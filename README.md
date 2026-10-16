@@ -1,6 +1,4 @@
-#<img width="97" height="105" alt="immagine-removebg-preview" src="https://github.com/user-attachments/assets/13c16a91-deb2-4c00-95a6-8a2ff50697d5" />
-
- RustyClicker
+<img width="97" height="105" alt="immagine-removebg-preview" src="https://github.com/user-attachments/assets/13c16a91-deb2-4c00-95a6-8a2ff50697d5" /> # RustyClicker
 
 
 
