@@ -1,9 +1,4 @@
 use image::{RgbImage, RgbaImage};
-use opencv::{
-    core::Mat,
-    imgproc::{self, COLOR_RGB2GRAY, TM_CCOEFF_NORMED},
-    prelude::*,
-};
 use std::{
     sync::{
         Arc, Mutex,
@@ -35,27 +30,35 @@ pub(crate) const CLICK_DELAYS_MS: [u64; 7] = [25, 50, 100, 250, 500, 1_000, 2_00
 pub(crate) struct PreparedTemplate {
     pub(crate) width: u32,
     pub(crate) height: u32,
-    gray_pixels: Vec<u8>,
+    centered_gray: Vec<f64>,
+    gray_energy: f64,
 }
 
 impl PreparedTemplate {
-    /// Converts an image to grayscale with OpenCV, ignoring alpha like PyScreeze's image loader.
+    /// Prepares a grayscale, mean-centered template for normalized correlation.
     pub(crate) fn new(source: RgbaImage) -> Result<Self, String> {
         let (width, height) = source.dimensions();
         let rgb: Vec<u8> = source
             .pixels()
             .flat_map(|pixel| [pixel[0], pixel[1], pixel[2]])
             .collect();
-        let gray_pixels = rgb_to_gray(&rgb, width, height)?;
+        let gray = rgb_to_gray(&rgb, width, height)?;
+        let mean = gray.iter().map(|&pixel| f64::from(pixel)).sum::<f64>() / gray.len() as f64;
+        let centered_gray: Vec<f64> = gray.iter().map(|&pixel| f64::from(pixel) - mean).collect();
+        let gray_energy = centered_gray.iter().map(|pixel| pixel * pixel).sum();
         Ok(Self {
             width,
             height,
-            gray_pixels,
+            centered_gray,
+            gray_energy,
         })
     }
 
     pub(crate) fn is_valid(&self) -> bool {
-        self.width > 0 && self.height > 0 && !self.gray_pixels.is_empty()
+        self.width > 0
+            && self.height > 0
+            && !self.centered_gray.is_empty()
+            && self.gray_energy > f64::EPSILON
     }
 }
 
@@ -170,33 +173,33 @@ fn sleep_interruptible(duration: Duration, stop: &AtomicBool) {
     }
 }
 
-/// Converts RGB bytes to OpenCV grayscale, mirroring the Python detector's grayscale inputs.
+/// Converts RGB bytes to grayscale with OpenCV-compatible fixed-point coefficients.
 fn rgb_to_gray(rgb: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
-    let rows =
-        i32::try_from(height).map_err(|_| "Image height exceeds OpenCV limits.".to_owned())?;
-    let _columns =
-        i32::try_from(width).map_err(|_| "Image width exceeds OpenCV limits.".to_owned())?;
-    let storage = Mat::from_slice(rgb)
-        .map_err(|error| format!("OpenCV could not read RGB image data: {error}"))?;
-    let rgb_mat = storage
-        .reshape(3, rows)
-        .map_err(|error| format!("OpenCV could not shape RGB image data: {error}"))?;
-    let mut gray = Mat::default();
-    imgproc::cvt_color(
-        &rgb_mat,
-        &mut gray,
-        COLOR_RGB2GRAY,
-        0,
-        opencv::core::AlgorithmHint::ALGO_HINT_DEFAULT,
-    )
-    .map_err(|error| format!("OpenCV could not convert RGB to grayscale: {error}"))?;
-    gray.data_typed::<u8>()
-        .map(|pixels| pixels.to_vec())
-        .map_err(|error| format!("OpenCV returned invalid grayscale data: {error}"))
+    let expected_bytes = usize::try_from(width)
+        .ok()
+        .and_then(|width| {
+            usize::try_from(height)
+                .ok()
+                .and_then(|height| width.checked_mul(height))
+        })
+        .and_then(|pixels| pixels.checked_mul(3))
+        .ok_or_else(|| "Image dimensions are too large.".to_owned())?;
+    if rgb.len() != expected_bytes {
+        return Err("RGB image data does not match its dimensions.".to_owned());
+    }
+    Ok(rgb
+        .chunks_exact(3)
+        .map(|pixel| {
+            let gray = 4_899 * u32::from(pixel[0])
+                + 9_617 * u32::from(pixel[1])
+                + 1_868 * u32::from(pixel[2])
+                + 8_192;
+            (gray >> 14) as u8
+        })
+        .collect())
 }
 
-/// Applies OpenCV TM_CCOEFF_NORMED and returns the first row-major score above confidence,
-/// as PyScreeze does for `locateAll(..., confidence=..., grayscale=True)`.
+/// Finds the first row-major match using normalized cross-correlation, as OpenCV does.
 fn find_template(
     screenshot: &RgbImage,
     template: &PreparedTemplate,
@@ -215,43 +218,111 @@ fn find_template(
     }
 
     let screen_gray = rgb_to_gray(screenshot.as_raw(), screen_width, screen_height)?;
-    let screen_rows =
-        i32::try_from(screen_height).map_err(|_| "Screenshot height exceeds OpenCV limits.")?;
-    let template_rows =
-        i32::try_from(template.height).map_err(|_| "Template height exceeds OpenCV limits.")?;
-    let screen_storage = Mat::from_slice(&screen_gray)
-        .map_err(|error| format!("OpenCV could not prepare the screenshot: {error}"))?;
-    let screen_mat = screen_storage
-        .reshape(1, screen_rows)
-        .map_err(|error| format!("OpenCV could not shape the screenshot: {error}"))?;
-    let template_storage = Mat::from_slice(&template.gray_pixels)
-        .map_err(|error| format!("OpenCV could not prepare the template: {error}"))?;
-    let template_mat = template_storage
-        .reshape(1, template_rows)
-        .map_err(|error| format!("OpenCV could not shape the template: {error}"))?;
-    let mut scores = Mat::default();
-    imgproc::match_template_def(&screen_mat, &template_mat, &mut scores, TM_CCOEFF_NORMED)
-        .map_err(|error| format!("OpenCV template matching failed: {error}"))?;
-
-    if stop.is_some_and(|flag| flag.load(Ordering::Acquire)) {
-        return Ok(None);
-    }
-    let score_values = scores
-        .data_typed::<f32>()
-        .map_err(|error| format!("OpenCV returned invalid match scores: {error}"))?;
-    let Some(index) = score_values.iter().position(|score| *score > confidence) else {
-        return Ok(None);
+    let screen_width =
+        usize::try_from(screen_width).map_err(|_| "Screenshot width exceeds platform limits.")?;
+    let screen_height =
+        usize::try_from(screen_height).map_err(|_| "Screenshot height exceeds platform limits.")?;
+    let template_width =
+        usize::try_from(template.width).map_err(|_| "Template width exceeds platform limits.")?;
+    let template_height =
+        usize::try_from(template.height).map_err(|_| "Template height exceeds platform limits.")?;
+    let result_width = screen_width - template_width + 1;
+    let result_height = screen_height - template_height + 1;
+    let split = result_height.div_ceil(2);
+    let (top_match, bottom_match) = thread::scope(|scope| {
+        let top = scope.spawn(|| {
+            find_in_rows(
+                &screen_gray,
+                screen_width,
+                result_width,
+                template_width,
+                template_height,
+                template,
+                0,
+                split,
+                confidence,
+                stop,
+            )
+        });
+        let bottom = scope.spawn(|| {
+            find_in_rows(
+                &screen_gray,
+                screen_width,
+                result_width,
+                template_width,
+                template_height,
+                template,
+                split,
+                result_height,
+                confidence,
+                stop,
+            )
+        });
+        let top_match = top
+            .join()
+            .map_err(|_| "Rust image-matching worker failed.")?;
+        let bottom_match = bottom
+            .join()
+            .map_err(|_| "Rust image-matching worker failed.")?;
+        Ok::<_, &str>((top_match, bottom_match))
+    })
+    .map_err(str::to_owned)?;
+    let found = match (top_match, bottom_match) {
+        (Some(top), Some(bottom)) => Some(if top.1 <= bottom.1 { top } else { bottom }),
+        (Some(found), None) | (None, Some(found)) => Some(found),
+        (None, None) => None,
     };
-    let result_width = usize::try_from(scores.cols())
-        .map_err(|_| "OpenCV returned an invalid match-score width.")?;
-    if result_width == 0 {
-        return Ok(None);
+    Ok(found.map(|(x, y)| (x, y, template.width, template.height)))
+}
+
+fn find_in_rows(
+    screen: &[u8],
+    screen_width: usize,
+    result_width: usize,
+    template_width: usize,
+    template_height: usize,
+    template: &PreparedTemplate,
+    start_y: usize,
+    end_y: usize,
+    confidence: f32,
+    stop: Option<&AtomicBool>,
+) -> Option<(u32, u32)> {
+    let sample_count = template.centered_gray.len() as f64;
+    let minimum_variance = 1e-12;
+    for y in start_y..end_y {
+        if stop.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+            return None;
+        }
+        for x in 0..result_width {
+            let mut sum = 0.0;
+            let mut sum_squared = 0.0;
+            let mut covariance = 0.0;
+            for template_y in 0..template_height {
+                let start = (y + template_y) * screen_width + x;
+                let screen_row = &screen[start..start + template_width];
+                let template_start = template_y * template_width;
+                let template_row =
+                    &template.centered_gray[template_start..template_start + template_width];
+                for (&screen_pixel, &centered_template) in
+                    screen_row.iter().zip(template_row.iter())
+                {
+                    let pixel = f64::from(screen_pixel);
+                    sum += pixel;
+                    sum_squared += pixel * pixel;
+                    covariance += pixel * centered_template;
+                }
+            }
+            let variance = (sum_squared - sum * sum / sample_count).max(0.0);
+            if variance <= minimum_variance {
+                continue;
+            }
+            let score = covariance / (template.gray_energy * variance).sqrt();
+            if score > f64::from(confidence) {
+                return Some((x as u32, y as u32));
+            }
+        }
     }
-    let x = u32::try_from(index % result_width)
-        .map_err(|_| "OpenCV returned an invalid match position.")?;
-    let y = u32::try_from(index / result_width)
-        .map_err(|_| "OpenCV returned an invalid match position.")?;
-    Ok(Some((x, y, template.width, template.height)))
+    None
 }
 
 /// Captures the virtual desktop and returns pixels together with its screen-space origin.
@@ -344,6 +415,7 @@ fn capture_screen() -> Result<(RgbImage, i32, i32), String> {
 mod tests {
     use super::{
         PreparedTemplate, default_click_delay_ms, find_template, normalize_click_delay_ms,
+        rgb_to_gray,
     };
     use crate::main_gui::{Preferences, Theme, scale};
     use image::{Rgb, RgbImage, Rgba, RgbaImage};
@@ -404,6 +476,36 @@ mod tests {
     }
 
     #[test]
+    fn matches_with_brightness_and_contrast_variation() {
+        let source = RgbaImage::from_fn(12, 12, |x, y| {
+            let value = ((x * 37 + y * 53 + x * y * 11) % 220 + 20) as u8;
+            Rgba([value, value, value, 255])
+        });
+        let template = PreparedTemplate::new(source.clone()).expect("Rust prepares the image");
+        let mut screen = RgbImage::from_pixel(32, 24, Rgb([0, 0, 0]));
+        for y in 0..source.height() {
+            for x in 0..source.width() {
+                let original = source.get_pixel(x, y)[0];
+                let adjusted = (f32::from(original) * 0.75 + 28.0).round() as u8;
+                screen.put_pixel(x + 7, y + 5, Rgb([adjusted, adjusted, adjusted]));
+            }
+        }
+        assert_eq!(
+            find_template(&screen, &template, 0.90, None).expect("matching succeeds"),
+            Some((7, 5, 12, 12))
+        );
+    }
+
+    #[test]
+    fn converts_rgb_to_grayscale_with_opencv_coefficients() {
+        assert_eq!(
+            rgb_to_gray(&[255, 0, 0, 0, 255, 0, 0, 0, 255], 3, 1)
+                .expect("RGB buffer dimensions are valid"),
+            vec![76, 150, 29]
+        );
+    }
+
+    #[test]
     fn confidence_threshold_is_strict() {
         let source = RgbaImage::from_fn(8, 8, |x, y| {
             Rgba([
@@ -457,7 +559,7 @@ mod tests {
     }
 
     #[test]
-    fn alpha_is_ignored_like_py_screeze_template_loading() {
+    fn alpha_is_ignored_during_grayscale_template_loading() {
         let image = RgbaImage::from_fn(8, 8, |x, _y| {
             if x < 4 {
                 Rgba([255, 100, 30, 255])
@@ -465,10 +567,21 @@ mod tests {
                 Rgba([0, 0, 0, 0])
             }
         });
-        let template = PreparedTemplate::new(image).expect("OpenCV converts the image");
-        let transparent_gray = template.gray_pixels[4];
-        assert_eq!(transparent_gray, 0);
+        let template = PreparedTemplate::new(image).expect("Rust prepares the image");
         assert!(template.is_valid());
+    }
+
+    #[test]
+    fn rejects_a_constant_template_without_texture() {
+        let screen = RgbImage::from_pixel(12, 12, Rgb([255, 128, 32]));
+        let template =
+            PreparedTemplate::new(RgbaImage::from_pixel(4, 4, Rgba([255, 128, 32, 255])))
+                .expect("Rust prepares the image");
+        assert_eq!(
+            find_template(&screen, &template, 0.90, None).expect("matching succeeds"),
+            None
+        );
+        assert!(!template.is_valid());
     }
 
     #[test]
