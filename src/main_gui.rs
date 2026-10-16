@@ -32,8 +32,9 @@ use windows::{
                 CreateDIBSection, CreateFontW, CreatePen, CreateSolidBrush, DEFAULT_CHARSET,
                 DEFAULT_PITCH, DEFAULT_QUALITY, DIB_RGB_COLORS, DT_CENTER, DT_SINGLELINE,
                 DT_VCENTER, DeleteObject, DrawTextW, FW_NORMAL, FillRect, GetDC, GetSysColorBrush,
-                HBRUSH, HDC, HFONT, HGDIOBJ, OUT_DEFAULT_PRECIS, PS_SOLID, Polygon, ReleaseDC,
-                RoundRect, ScreenToClient, SelectObject, SetBkColor, SetTextColor, UpdateWindow,
+                HBRUSH, HDC, HFONT, HGDIOBJ, InvalidateRect, OUT_DEFAULT_PRECIS, PS_SOLID, Polygon,
+                ReleaseDC, RoundRect, ScreenToClient, SelectObject, SetBkColor, SetTextColor,
+                UpdateWindow,
             },
         },
         System::LibraryLoader::GetModuleHandleW,
@@ -468,6 +469,8 @@ impl AppState {
                 Some(WPARAM(IMAGE_BITMAP)),
                 Some(LPARAM(bitmap.0 as isize)),
             );
+            let _ = InvalidateRect(Some(self.preview), None, true);
+            let _ = UpdateWindow(self.preview);
             if !self.preview_bitmap.0.is_null() {
                 let _ = DeleteObject(HGDIOBJ(self.preview_bitmap.0));
             }
@@ -1197,9 +1200,6 @@ unsafe fn create_controls(window: HWND, state: &mut AppState) {
         }
         for control in &state.settings_controls {
             let _ = ShowWindow(*control, SW_HIDE);
-        }
-        if let Err(error) = state.refresh_preview(window) {
-            state.show_message(&error, MB_ICONERROR);
         }
         let dark_titlebar = i32::from(state.theme != Theme::Light);
         let _ = DwmSetWindowAttribute(
@@ -2113,6 +2113,9 @@ pub(super) fn run() {
         };
         let _ = ShowWindow(window, SW_SHOW);
         let _ = UpdateWindow(window);
+        if let Err(error) = state.refresh_preview(window) {
+            state.show_message(&error, MB_ICONERROR);
+        }
 
         let mut message = MSG::default();
         while GetMessageW(&mut message, None, 0, 0).as_bool() {

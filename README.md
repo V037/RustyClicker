@@ -1,6 +1,6 @@
 # RustyClicker
 
-**Version:** v1.0.0
+**Version:** v1.0.1
 
 RustyClicker is a lightweight Windows autoclicker written in Rust. It watches
 the screen for selected image targets and clicks the center of a target when it
