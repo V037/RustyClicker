@@ -1,0 +1,29 @@
+[package]
+name = "image-clicker"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+image = { version = "0.25.10", default-features = false, features = ["bmp", "jpeg", "png"] }
+opencv = { version = "0.101.1", default-features = false, features = ["clang-runtime", "imgproc"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_System_SystemServices",
+    "Win32_UI_Controls",
+    "Win32_UI_Controls_Dialogs",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
