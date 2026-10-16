@@ -3,7 +3,6 @@ use image::RgbImage;
 use image::RgbaImage;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use std::{
-    cell::RefCell,
     sync::{
         Arc, Mutex, OnceLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -35,9 +34,8 @@ pub(crate) const CLICK_DELAYS_MS: [u64; 7] = [25, 50, 100, 250, 500, 1_000, 2_00
 pub(crate) struct PreparedTemplate {
     pub(crate) width: u32,
     pub(crate) height: u32,
-    centered_gray: Vec<i16>,
-    centered_sum: i64,
     gray_energy: f64,
+    matcher: Option<corrmatch::Matcher>,
 }
 
 impl PreparedTemplate {
@@ -55,31 +53,81 @@ impl PreparedTemplate {
         let pixel_count = gray.len() as i64;
         let gray_sum: i64 = gray.iter().map(|&pixel| i64::from(pixel)).sum();
         let integer_mean = gray_sum / pixel_count;
-        let centered_gray: Vec<i16> = gray
+        let gray_energy: i64 = gray
             .iter()
-            .map(|&pixel| (i64::from(pixel) - integer_mean) as i16)
-            .collect();
-        let centered_sum = gray_sum - integer_mean * pixel_count;
-        let square_sum: i64 = centered_gray
-            .iter()
-            .map(|&pixel| i64::from(pixel) * i64::from(pixel))
+            .map(|&pixel| {
+                let centered = i64::from(pixel) - integer_mean;
+                centered * centered
+            })
             .sum();
-        let gray_energy =
-            square_sum as f64 - (centered_sum * centered_sum) as f64 / pixel_count as f64;
+        let gray_energy = gray_energy as f64;
+        let width_usize =
+            usize::try_from(width).map_err(|_| "Image width exceeds platform limits.")?;
+        let height_usize =
+            usize::try_from(height).map_err(|_| "Image height exceeds platform limits.")?;
+        let matcher = if gray_energy > 1e-12 {
+            let matcher_template = corrmatch::Template::new(gray, width_usize, height_usize)
+                .map_err(|error| format!("Could not create image matcher template: {error}"))?;
+            let mut compile_config = corrmatch::CompileConfigNoRot::default();
+            compile_config.max_levels = 4;
+            let compiled_template =
+                corrmatch::CompiledTemplate::compile_unrotated(&matcher_template, compile_config)
+                    .map_err(|error| format!("Could not compile image matcher template: {error}"))?;
+            let mut match_config = corrmatch::MatchConfig::default();
+            match_config.parallel = true;
+            match_config.max_image_levels = 4;
+            Some(corrmatch::Matcher::new(compiled_template).with_config(match_config))
+        } else {
+            None
+        };
         Ok(Self {
             width,
             height,
-            centered_gray,
-            centered_sum,
             gray_energy,
+            matcher,
         })
     }
 
     pub(crate) fn is_valid(&self) -> bool {
-        self.width > 0
-            && self.height > 0
-            && !self.centered_gray.is_empty()
-            && self.gray_energy > 1e-12
+        self.width > 0 && self.height > 0 && self.gray_energy > 1e-12 && self.matcher.is_some()
+    }
+
+    fn find_match(
+        &self,
+        screen_gray: &[u8],
+        screen_width: u32,
+        screen_height: u32,
+        confidence: f32,
+        stop: Option<&AtomicBool>,
+    ) -> Result<Option<(u32, u32, u32, u32)>, String> {
+        if !self.is_valid()
+            || self.width > screen_width
+            || self.height > screen_height
+            || stop.is_some_and(|flag| flag.load(Ordering::Acquire))
+        {
+            return Ok(None);
+        }
+        let Some(matcher) = &self.matcher else {
+            return Ok(None);
+        };
+        let width = usize::try_from(screen_width)
+            .map_err(|_| "Screenshot width exceeds platform limits.")?;
+        let height = usize::try_from(screen_height)
+            .map_err(|_| "Screenshot height exceeds platform limits.")?;
+        let image = corrmatch::ImageView::from_slice(screen_gray, width, height)
+            .map_err(|error| format!("Could not prepare screenshot for matching: {error}"))?;
+        let pool = match_pool()?;
+        let result = pool
+            .install(|| matcher.match_image(image))
+            .map_err(|error| format!("Image matching failed: {error}"))?;
+        if stop.is_some_and(|flag| flag.load(Ordering::Acquire)) || result.score <= confidence {
+            return Ok(None);
+        }
+        let max_x = screen_width - self.width;
+        let max_y = screen_height - self.height;
+        let x = (result.x.round() as u32).min(max_x);
+        let y = (result.y.round() as u32).min(max_y);
+        Ok(Some((x, y, self.width, self.height)))
     }
 }
 
@@ -104,27 +152,7 @@ pub(crate) struct WorkerState {
     pub(crate) message: Mutex<String>,
 }
 
-struct ColumnSums {
-    sums: Vec<u64>,
-    squares: Vec<u64>,
-}
-
-impl ColumnSums {
-    const fn new() -> Self {
-        Self {
-            sums: Vec::new(),
-            squares: Vec::new(),
-        }
-    }
-}
-
-thread_local! {
-    static COLUMN_SUMS: RefCell<ColumnSums> = const { RefCell::new(ColumnSums::new()) };
-}
-
 static MATCH_POOL: OnceLock<Result<ThreadPool, String>> = OnceLock::new();
-type DotProductKernel = unsafe fn(&[u8], &[i16]) -> i64;
-
 fn match_pool() -> Result<&'static ThreadPool, String> {
     match MATCH_POOL.get_or_init(|| {
         ThreadPoolBuilder::new()
@@ -157,11 +185,10 @@ pub(crate) fn run_clicker(templates: Vec<PreparedTemplate>, worker: Arc<WorkerSt
             };
 
         let template = &templates[next_template_index];
-        let found = match find_template_gray(
+        let found = match template.find_match(
             &screen_gray,
             screen_width,
             screen_height,
-            template,
             MATCH_CONFIDENCE,
             Some(&worker.stop),
         ) {
@@ -311,301 +338,7 @@ fn find_template(
     }
 
     let screen_gray = rgb_to_gray(screenshot.as_raw(), screen_width, screen_height)?;
-    find_template_gray(
-        &screen_gray,
-        screen_width,
-        screen_height,
-        template,
-        confidence,
-        stop,
-    )
-}
-
-fn find_template_gray(
-    screen_gray: &[u8],
-    screen_width: u32,
-    screen_height: u32,
-    template: &PreparedTemplate,
-    confidence: f32,
-    stop: Option<&AtomicBool>,
-) -> Result<Option<(u32, u32, u32, u32)>, String> {
-    if !template.is_valid() {
-        return Ok(None);
-    }
-    if template.width > screen_width || template.height > screen_height {
-        return Ok(None);
-    }
-    if stop.is_some_and(|flag| flag.load(Ordering::Acquire)) {
-        return Ok(None);
-    }
-    let expected_screen_pixels = usize::try_from(screen_width)
-        .ok()
-        .and_then(|width| {
-            usize::try_from(screen_height)
-                .ok()
-                .and_then(|height| width.checked_mul(height))
-        })
-        .ok_or_else(|| "Screenshot dimensions are too large.".to_owned())?;
-    if screen_gray.len() != expected_screen_pixels {
-        return Err("Grayscale screen data does not match its dimensions.".to_owned());
-    }
-    let screen_width =
-        usize::try_from(screen_width).map_err(|_| "Screenshot width exceeds platform limits.")?;
-    let screen_height =
-        usize::try_from(screen_height).map_err(|_| "Screenshot height exceeds platform limits.")?;
-    let template_width =
-        usize::try_from(template.width).map_err(|_| "Template width exceeds platform limits.")?;
-    let template_height =
-        usize::try_from(template.height).map_err(|_| "Template height exceeds platform limits.")?;
-    let result_width = screen_width - template_width + 1;
-    let result_height = screen_height - template_height + 1;
-    let split = result_height.div_ceil(2);
-    let found_in_top = AtomicBool::new(false);
-    let pool = match_pool()?;
-    // The fixed pool keeps the two row ranges parallel without spawning threads per scan.
-    let (top_match, bottom_match) = pool.install(|| {
-        rayon::join(
-            || {
-                let found = COLUMN_SUMS.with_borrow_mut(|columns| {
-                    find_in_rows(
-                        screen_gray,
-                        screen_width,
-                        result_width,
-                        template_width,
-                        template_height,
-                        template,
-                        0,
-                        split,
-                        confidence,
-                        stop,
-                        None,
-                        columns,
-                    )
-                });
-                if found.is_some() {
-                    found_in_top.store(true, Ordering::Release);
-                }
-                found
-            },
-            || {
-                COLUMN_SUMS.with_borrow_mut(|columns| {
-                    find_in_rows(
-                        screen_gray,
-                        screen_width,
-                        result_width,
-                        template_width,
-                        template_height,
-                        template,
-                        split,
-                        result_height,
-                        confidence,
-                        stop,
-                        Some(&found_in_top),
-                        columns,
-                    )
-                })
-            },
-        )
-    });
-    let found = match (top_match, bottom_match) {
-        (Some(top), Some(bottom)) => Some(if top.1 <= bottom.1 { top } else { bottom }),
-        (Some(found), None) | (None, Some(found)) => Some(found),
-        (None, None) => None,
-    };
-    Ok(found.map(|(x, y)| (x, y, template.width, template.height)))
-}
-
-fn find_in_rows(
-    screen: &[u8],
-    screen_width: usize,
-    result_width: usize,
-    template_width: usize,
-    template_height: usize,
-    template: &PreparedTemplate,
-    start_y: usize,
-    end_y: usize,
-    confidence: f32,
-    stop: Option<&AtomicBool>,
-    earlier_match: Option<&AtomicBool>,
-    columns: &mut ColumnSums,
-) -> Option<(u32, u32)> {
-    if start_y >= end_y {
-        return None;
-    }
-    let sample_count = template.centered_gray.len() as u64;
-    columns.sums.resize(screen_width, 0);
-    columns.squares.resize(screen_width, 0);
-    columns.sums.fill(0);
-    columns.squares.fill(0);
-
-    for row in start_y..start_y + template_height {
-        let offset = row * screen_width;
-        for x in 0..screen_width {
-            let pixel = u64::from(screen[offset + x]);
-            columns.sums[x] += pixel;
-            columns.squares[x] += pixel * pixel;
-        }
-    }
-
-    let confidence_squared = f64::from(confidence).powi(2);
-    let dot_kernel = dot_product_kernel();
-    for y in start_y..end_y {
-        if stop.is_some_and(|flag| flag.load(Ordering::Acquire))
-            || earlier_match.is_some_and(|flag| flag.load(Ordering::Acquire))
-        {
-            return None;
-        }
-        let mut sum = columns.sums[..template_width].iter().copied().sum::<u64>();
-        let mut square_sum = columns.squares[..template_width]
-            .iter()
-            .copied()
-            .sum::<u64>();
-
-        for x in 0..result_width {
-            // Rolling sums give each window's variance in constant time; only the dot product
-            // still needs to inspect template pixels.
-            let window_energy = square_sum as f64 - sum as f64 * sum as f64 / sample_count as f64;
-            if window_energy > 1e-12 {
-                let dot = dot_product(
-                    &screen[y * screen_width + x..],
-                    screen_width,
-                    template_width,
-                    &template.centered_gray,
-                    dot_kernel,
-                );
-                let centered_dot =
-                    dot as f64 - sum as f64 * template.centered_sum as f64 / sample_count as f64;
-                // A squared comparison preserves the threshold while avoiding a sqrt per window.
-                if centered_dot > 0.0
-                    && centered_dot * centered_dot
-                        > confidence_squared * template.gray_energy * window_energy
-                {
-                    return Some((x as u32, y as u32));
-                }
-            }
-            if x + 1 < result_width {
-                sum = sum - columns.sums[x] + columns.sums[x + template_width];
-                square_sum = square_sum - columns.squares[x] + columns.squares[x + template_width];
-            }
-            if x & 63 == 0
-                && (stop.is_some_and(|flag| flag.load(Ordering::Acquire))
-                    || earlier_match.is_some_and(|flag| flag.load(Ordering::Acquire)))
-            {
-                return None;
-            }
-        }
-
-        if y + 1 < end_y {
-            let outgoing = y * screen_width;
-            let incoming = (y + template_height) * screen_width;
-            for x in 0..screen_width {
-                let old = u64::from(screen[outgoing + x]);
-                let new = u64::from(screen[incoming + x]);
-                columns.sums[x] = columns.sums[x] - old + new;
-                columns.squares[x] = columns.squares[x] - old * old + new * new;
-            }
-        }
-    }
-    None
-}
-
-/// Computes a SIMD dot product with AVX2/SSE2 where available.
-#[inline]
-fn dot_product(
-    screen: &[u8],
-    stride: usize,
-    template_width: usize,
-    template: &[i16],
-    kernel: DotProductKernel,
-) -> i64 {
-    let mut sum = 0i64;
-    for (row_index, template_row) in template.chunks_exact(template_width).enumerate() {
-        let row_start = row_index * stride;
-        sum += unsafe { kernel(&screen[row_start..row_start + template_width], template_row) };
-    }
-    sum
-}
-
-#[cfg(target_arch = "x86_64")]
-fn dot_product_kernel() -> DotProductKernel {
-    if std::arch::is_x86_feature_detected!("avx2") {
-        dot_product_avx2
-    } else {
-        dot_product_sse2
-    }
-}
-
-#[cfg(not(target_arch = "x86_64"))]
-unsafe fn dot_product_scalar(screen: &[u8], template: &[i16]) -> i64 {
-    screen
-        .iter()
-        .zip(template)
-        .map(|(&pixel, &centered)| i64::from(pixel) * i64::from(centered))
-        .sum()
-}
-
-#[cfg(not(target_arch = "x86_64"))]
-fn dot_product_kernel() -> DotProductKernel {
-    dot_product_scalar
-}
-
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "sse2")]
-unsafe fn dot_product_sse2(screen: &[u8], template: &[i16]) -> i64 {
-    use std::arch::x86_64::*;
-    let mut low_sum = _mm_setzero_si128();
-    let mut high_sum = _mm_setzero_si128();
-    let mut offset = 0;
-    while offset + 8 <= template.len() {
-        let pixel_bytes = unsafe { _mm_loadl_epi64(screen.as_ptr().add(offset).cast()) };
-        let pixels = _mm_unpacklo_epi8(pixel_bytes, _mm_setzero_si128());
-        let centered = unsafe { _mm_loadu_si128(template.as_ptr().add(offset).cast()) };
-        let pairs = _mm_madd_epi16(pixels, centered);
-        let signs = _mm_srai_epi32(pairs, 31);
-        low_sum = _mm_add_epi64(low_sum, _mm_unpacklo_epi32(pairs, signs));
-        let high_pairs = _mm_srli_si128(pairs, 8);
-        let high_signs = _mm_srai_epi32(high_pairs, 31);
-        high_sum = _mm_add_epi64(high_sum, _mm_unpacklo_epi32(high_pairs, high_signs));
-        offset += 8;
-    }
-    let mut lanes = [0i64; 2];
-    unsafe { _mm_storeu_si128(lanes.as_mut_ptr().cast(), low_sum) };
-    let mut high_lanes = [0i64; 2];
-    unsafe { _mm_storeu_si128(high_lanes.as_mut_ptr().cast(), high_sum) };
-    let mut sum = lanes[0] + lanes[1] + high_lanes[0] + high_lanes[1];
-    for index in offset..template.len() {
-        sum += i64::from(screen[index]) * i64::from(template[index]);
-    }
-    sum
-}
-
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2")]
-unsafe fn dot_product_avx2(screen: &[u8], template: &[i16]) -> i64 {
-    use std::arch::x86_64::*;
-    let mut low_sum = _mm256_setzero_si256();
-    let mut high_sum = _mm256_setzero_si256();
-    let mut offset = 0;
-    while offset + 16 <= template.len() {
-        let pixel_bytes = unsafe { _mm_loadu_si128(screen.as_ptr().add(offset).cast()) };
-        let pixels = _mm256_cvtepu8_epi16(pixel_bytes);
-        let centered = unsafe { _mm256_loadu_si256(template.as_ptr().add(offset).cast()) };
-        let pairs = _mm256_madd_epi16(pixels, centered);
-        let low_pairs = _mm256_castsi256_si128(pairs);
-        let high_pairs = _mm256_extracti128_si256(pairs, 1);
-        low_sum = _mm256_add_epi64(low_sum, _mm256_cvtepi32_epi64(low_pairs));
-        high_sum = _mm256_add_epi64(high_sum, _mm256_cvtepi32_epi64(high_pairs));
-        offset += 16;
-    }
-    let mut lanes = [0i64; 4];
-    unsafe { _mm256_storeu_si256(lanes.as_mut_ptr().cast(), low_sum) };
-    let mut high_lanes = [0i64; 4];
-    unsafe { _mm256_storeu_si256(high_lanes.as_mut_ptr().cast(), high_sum) };
-    let mut sum = lanes.iter().chain(&high_lanes).sum::<i64>();
-    for index in offset..template.len() {
-        sum += i64::from(screen[index]) * i64::from(template[index]);
-    }
-    sum
+    template.find_match(&screen_gray, screen_width, screen_height, confidence, stop)
 }
 
 struct ScreenCapture {
@@ -756,7 +489,7 @@ fn capture_screen(
 #[cfg(test)]
 mod tests {
     use super::{
-        PreparedTemplate, bgra_to_gray, default_click_delay_ms, dot_product_kernel, find_template,
+        PreparedTemplate, bgra_to_gray, default_click_delay_ms, find_template,
         normalize_click_delay_ms, rgb_to_gray,
     };
     use crate::main_gui::{Preferences, Theme, scale};
@@ -790,7 +523,7 @@ mod tests {
     }
 
     #[test]
-    fn chooses_the_first_row_major_match() {
+    fn finds_a_match_when_the_target_appears_more_than_once() {
         let source = RgbaImage::from_fn(8, 8, |x, y| {
             Rgba([
                 ((x * 47 + y * 17 + x * y * 13) % 256) as u8,
@@ -811,10 +544,8 @@ mod tests {
                 screen.put_pixel(x + 2, y + 10, *rgb.get_pixel(x, y));
             }
         }
-        assert_eq!(
-            find_template(&screen, &template, 0.92, None).expect("OpenCV matching succeeds"),
-            Some((10, 1, 8, 8))
-        );
+        let found = find_template(&screen, &template, 0.92, None).expect("image matching succeeds");
+        assert!(matches!(found, Some((2, 10, 8, 8)) | Some((10, 1, 8, 8))));
     }
 
     #[test]
@@ -855,26 +586,55 @@ mod tests {
         assert_eq!(gray, vec![76, 150, 29]);
     }
 
+    #[cfg(not(debug_assertions))]
     #[test]
-    fn selected_simd_kernel_matches_scalar_dot_product() {
-        let pixels: Vec<u8> = (0..67).map(|index| (index * 37 % 256) as u8).collect();
-        let centered: Vec<i16> = (0..67)
-            .map(|index| (index * 53 % 511) as i16 - 255)
-            .collect();
-        let expected = pixels
-            .iter()
-            .zip(&centered)
-            .map(|(&pixel, &value)| i64::from(pixel) * i64::from(value))
-            .sum::<i64>();
-        let kernel = dot_product_kernel();
-        assert_eq!(unsafe { kernel(&pixels, &centered) }, expected);
-        #[cfg(target_arch = "x86_64")]
-        unsafe {
-            assert_eq!(super::dot_product_sse2(&pixels, &centered), expected);
-            if std::arch::is_x86_feature_detected!("avx2") {
-                assert_eq!(super::dot_product_avx2(&pixels, &centered), expected);
+    fn release_full_hd_scan_benchmark() {
+        let screenshot = RgbImage::from_fn(1920, 1080, |x, y| {
+            let value = (x
+                .wrapping_mul(1_664_525)
+                .wrapping_add(y.wrapping_mul(1_013_904_223))
+                .wrapping_add((x ^ y).wrapping_mul(101)))
+            .rotate_left(13) as u8;
+            Rgb([value, value, value])
+        });
+        let template_image = RgbaImage::from_fn(64, 64, |x, y| {
+            let value = (x
+                .wrapping_mul(2_654_435_761)
+                .wrapping_add(y.wrapping_mul(2_246_822_519))
+                .wrapping_add((x ^ y).wrapping_mul(313)))
+            .rotate_left(9) as u8;
+            Rgba([value, value, value, 255])
+        });
+        let template = PreparedTemplate::new(template_image.clone()).expect("template prepares");
+        let started = std::time::Instant::now();
+        let found = find_template(&screenshot, &template, 0.90, None).expect("matching completes");
+        println!(
+            "1920x1080, 64x64 no-match scan: {:.2} ms, result: {found:?}",
+            started.elapsed().as_secs_f64() * 1_000.0
+        );
+        assert_eq!(found, None);
+
+        let target_x = 917;
+        let target_y = 511;
+        let mut exact_screen = screenshot;
+        for y in 0..template.height {
+            for x in 0..template.width {
+                let target_pixel = template_image.get_pixel(x, y);
+                exact_screen.put_pixel(
+                    target_x + x,
+                    target_y + y,
+                    Rgb([target_pixel[0], target_pixel[1], target_pixel[2]]),
+                );
             }
         }
+        let started = std::time::Instant::now();
+        let found =
+            find_template(&exact_screen, &template, 0.90, None).expect("matching completes");
+        println!(
+            "1920x1080, 64x64 exact-match scan: {:.2} ms, result: {found:?}",
+            started.elapsed().as_secs_f64() * 1_000.0
+        );
+        assert_eq!(found, Some((target_x, target_y, 64, 64)));
     }
 
     #[test]

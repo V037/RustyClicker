@@ -55,8 +55,8 @@ use windows::{
                 CallWindowProcW, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
                 GWLP_USERDATA, GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetMessageW, GetParent,
                 GetWindowLongPtrW, GetWindowTextW, HMENU, HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST,
-                IDC_ARROW, LoadCursorW, MB_ICONERROR, MB_ICONWARNING, MB_OK, MINMAXINFO, MSG,
-                MessageBoxW, MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW,
+                IDC_ARROW, LoadCursorW, LoadIconW, MB_ICONERROR, MB_ICONWARNING, MB_OK, MINMAXINFO,
+                MSG, MessageBoxW, MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW,
                 STM_SETIMAGE, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
                 SWP_NOZORDER, SendMessageW, SetTimer, SetWindowLongPtrW, SetWindowPos,
                 SetWindowTextW, ShowWindow, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE,
@@ -639,7 +639,7 @@ impl AppState {
         set_text(self.status_label, "Running | Scan: waiting");
 
         let spawn_result = thread::Builder::new()
-            .name("image-clicker".to_owned())
+            .name("rusty-clicker".to_owned())
             .spawn(move || run_clicker(templates, worker));
         if let Err(error) = spawn_result {
             if let Some(worker) = self.worker.take() {
@@ -1992,10 +1992,24 @@ pub(super) fn run() {
             }
         };
         let cursor = LoadCursorW(None, IDC_ARROW).unwrap_or_default();
+        let icon = match LoadIconW(Some(instance), PCWSTR(1usize as *const u16)) {
+            Ok(icon) => icon,
+            Err(error) => {
+                let text: Vec<u16> = error.to_string().encode_utf16().chain(Some(0)).collect();
+                MessageBoxW(
+                    None,
+                    PCWSTR(text.as_ptr()),
+                    WINDOW_TITLE,
+                    MB_OK | MB_ICONERROR,
+                );
+                return;
+            }
+        };
         let class = WNDCLASSW {
             lpfnWndProc: Some(window_proc),
             hInstance: instance,
             hCursor: cursor,
+            hIcon: icon,
             hbrBackground: GetSysColorBrush(COLOR_WINDOW),
             lpszClassName: WINDOW_CLASS,
             ..Default::default()

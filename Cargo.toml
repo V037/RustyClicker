@@ -1,9 +1,15 @@
 [package]
-name = "image-clicker"
+name = "rusty-clicker"
 version = "0.1.0"
 edition = "2024"
+build = "build.rs"
+
+[[bin]]
+name = "RustyClicker"
+path = "src/main.rs"
 
 [dependencies]
+corrmatch = { version = "0.2.5", features = ["rayon", "simd"] }
 image = { version = "0.25.10", default-features = false, features = ["bmp", "jpeg", "png"] }
 rayon = "1.12.0"
 serde = { version = "1", features = ["derive"] }
@@ -27,3 +33,6 @@ lto = true
 codegen-units = 1
 strip = true
 panic = "abort"
+
+[build-dependencies]
+embed-resource = "3.0.12"
