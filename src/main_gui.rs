@@ -632,13 +632,11 @@ impl AppState {
             running: AtomicBool::new(true),
             clicks: AtomicU64::new(0),
             click_delay_ms: AtomicU64::new(self.click_delay_ms),
+            scan_duration_us: AtomicU64::new(0),
             message: Mutex::new(String::new()),
         });
         self.worker = Some(Arc::clone(&worker));
-        set_text(
-            self.status_label,
-            "Running. F2 stops image detection and clicking.",
-        );
+        set_text(self.status_label, "Running | Scan: waiting");
 
         let spawn_result = thread::Builder::new()
             .name("image-clicker".to_owned())
@@ -1901,13 +1899,15 @@ unsafe extern "system" fn window_proc(
                 if worker_finished {
                     if let Some(worker) = state.worker.take() {
                         let clicks = worker.clicks.load(Ordering::Relaxed);
+                        let scan_ms =
+                            worker.scan_duration_us.load(Ordering::Relaxed) as f64 / 1_000.0;
                         let message = worker
                             .message
                             .lock()
                             .unwrap_or_else(std::sync::PoisonError::into_inner)
                             .clone();
                         let status = if message.is_empty() {
-                            format!("Stopped. Total clicks: {clicks}")
+                            format!("Stopped | {clicks} clicks | Scan: {scan_ms:.2} ms")
                         } else {
                             message
                         };
@@ -1916,7 +1916,11 @@ unsafe extern "system" fn window_proc(
                     }
                 } else if let Some(worker) = &state.worker {
                     let clicks = worker.clicks.load(Ordering::Relaxed);
-                    set_text(state.status_label, &format!("Running. Clicks: {clicks}"));
+                    let scan_ms = worker.scan_duration_us.load(Ordering::Relaxed) as f64 / 1_000.0;
+                    set_text(
+                        state.status_label,
+                        &format!("Clicks: {clicks} | Scan: {scan_ms:.2} ms"),
+                    );
                 }
                 LRESULT(0)
             }
