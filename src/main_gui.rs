@@ -1406,6 +1406,9 @@ unsafe fn draw_cursor_icon(state: &AppState, item: &DRAWITEMSTRUCT) {
     }
 
     unsafe {
+        if !state.background_brush.0.is_null() {
+            let _ = FillRect(item.hDC, &item.rcItem, state.background_brush);
+        }
         let old_brush = SelectObject(item.hDC, HGDIOBJ(outline.0));
         let old_pen = SelectObject(item.hDC, HGDIOBJ(outline_pen.0));
         let outer = [

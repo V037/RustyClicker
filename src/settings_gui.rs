@@ -239,6 +239,9 @@ impl AppState {
             for control in self
                 .main_controls
                 .iter()
+                .chain(std::iter::once(&self.main_brand_icon))
+                .chain(std::iter::once(&self.main_heading))
+                .chain(std::iter::once(&self.version_label))
                 .chain(self.settings_controls.iter())
                 .chain(std::iter::once(&self.settings_button))
             {
