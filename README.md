@@ -1,5 +1,7 @@
 # RustyClicker
 
+**Version:** v1.0.0
+
 RustyClicker is a lightweight Windows autoclicker written in Rust. It watches
 the screen for selected image targets and clicks the center of a target when it
 finds one.
@@ -75,3 +77,7 @@ guarantee. The test includes RGB-to-grayscale conversion and matching, but not
 Windows screen capture, cursor movement, or clicking. In particular, the
 10 ms scan interval is a target, not a guarantee that each full-screen scan
 finishes in 10 ms.
+
+## Credits
+
+Created by **V037_**.

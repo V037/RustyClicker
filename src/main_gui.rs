@@ -51,20 +51,20 @@ use windows::{
             },
             WindowsAndMessaging::{
                 BM_GETCHECK, BM_SETCHECK, BS_AUTOCHECKBOX, CB_ADDSTRING, CB_GETCURSEL,
-                CB_RESETCONTENT, CB_SETCURSEL, CBN_SELCHANGE, CBS_DROPDOWNLIST, CW_USEDEFAULT,
-                CallWindowProcW, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-                GWLP_USERDATA, GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetMessageW, GetParent,
-                GetWindowLongPtrW, GetWindowTextW, HMENU, HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST,
-                IDC_ARROW, LoadCursorW, LoadIconW, MB_ICONERROR, MB_ICONWARNING, MB_OK, MINMAXINFO,
-                MSG, MessageBoxW, MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW,
-                STM_SETIMAGE, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-                SWP_NOZORDER, SendMessageW, SetTimer, SetWindowLongPtrW, SetWindowPos,
-                SetWindowTextW, ShowWindow, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE,
-                WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLOREDIT,
-                WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_DRAWITEM,
-                WM_ERASEBKGND, WM_GETMINMAXINFO, WM_HOTKEY, WM_KEYDOWN, WM_LBUTTONDOWN,
-                WM_NCCREATE, WM_NCHITTEST, WM_SETFONT, WM_SIZE, WM_TIMER, WNDCLASSW, WNDPROC,
-                WS_CHILD, WS_POPUP, WS_THICKFRAME, WS_VISIBLE,
+                CB_RESETCONTENT, CB_SETCURSEL, CBN_SELCHANGE, CBS_DROPDOWNLIST, CS_HREDRAW,
+                CS_VREDRAW, CW_USEDEFAULT, CallWindowProcW, CreateWindowExW, DefWindowProcW,
+                DestroyWindow, DispatchMessageW, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect,
+                GetDlgCtrlID, GetMessageW, GetParent, GetWindowLongPtrW, GetWindowTextW, HMENU,
+                HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST, IDC_ARROW, LoadCursorW, LoadIconW,
+                MB_ICONERROR, MB_ICONWARNING, MB_OK, MINMAXINFO, MSG, MessageBoxW, MoveWindow,
+                PostMessageW, PostQuitMessage, RegisterClassW, STM_SETIMAGE, SW_HIDE, SW_SHOW,
+                SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SendMessageW, SetTimer,
+                SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage,
+                WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN,
+                WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED,
+                WM_DRAWITEM, WM_ERASEBKGND, WM_GETMINMAXINFO, WM_HOTKEY, WM_KEYDOWN,
+                WM_LBUTTONDOWN, WM_NCCREATE, WM_NCHITTEST, WM_SETFONT, WM_SIZE, WM_TIMER,
+                WNDCLASSW, WNDPROC, WS_CHILD, WS_CLIPCHILDREN, WS_POPUP, WS_THICKFRAME, WS_VISIBLE,
             },
         },
     },
@@ -92,6 +92,8 @@ const ID_SLOT_LABEL: usize = 302;
 const ID_PREVIEW_LABEL: usize = 303;
 const ID_STATUS_LABEL: usize = 304;
 const ID_EMPTY_PREVIEW: usize = 306;
+const ID_CREDIT_LABEL: usize = 307;
+const ID_VERSION_LABEL: usize = 308;
 const BUTTON_STYLE: u32 = windows::Win32::UI::WindowsAndMessaging::BS_OWNERDRAW as u32;
 const IMAGE_BITMAP: usize = 0;
 
@@ -104,6 +106,7 @@ struct AppState {
     main_controls: Vec<HWND>,
     settings_controls: Vec<HWND>,
     status_label: HWND,
+    credit_label: HWND,
     slot_label: HWND,
     slot_combo: HWND,
     preview_label: HWND,
@@ -120,6 +123,7 @@ struct AppState {
     settings_title: HWND,
     main_brand_icon: HWND,
     main_heading: HWND,
+    version_label: HWND,
     delay_combo: HWND,
     theme_combo: HWND,
     slot_count_combo: HWND,
@@ -153,6 +157,7 @@ impl AppState {
             main_controls: Vec::with_capacity(16),
             settings_controls: Vec::with_capacity(8),
             status_label: HWND::default(),
+            credit_label: HWND::default(),
             slot_label: HWND::default(),
             slot_combo: HWND::default(),
             preview_label: HWND::default(),
@@ -169,6 +174,7 @@ impl AppState {
             settings_title: HWND::default(),
             main_brand_icon: HWND::default(),
             main_heading: HWND::default(),
+            version_label: HWND::default(),
             delay_combo: HWND::default(),
             theme_combo: HWND::default(),
             slot_count_combo: HWND::default(),
@@ -803,6 +809,22 @@ unsafe fn create_controls(window: HWND, state: &mut AppState) {
             30,
             0,
         );
+        state.version_label = create_control(
+            window,
+            w!("STATIC"),
+            concat!(
+                "v",
+                env!("CARGO_PKG_VERSION_MAJOR"),
+                ".",
+                env!("CARGO_PKG_VERSION_MINOR")
+            ),
+            WINDOW_STYLE(0),
+            290,
+            22,
+            48,
+            18,
+            ID_VERSION_LABEL,
+        );
         state.settings_button = create_control(
             window,
             w!("BUTTON"),
@@ -910,12 +932,23 @@ unsafe fn create_controls(window: HWND, state: &mut AppState) {
             window,
             w!("STATIC"),
             "Ready  |  Select at least one target image.",
-            WINDOW_STYLE(0),
+            WINDOW_STYLE(windows::Win32::System::SystemServices::SS_LEFTNOWORDWRAP.0),
             20,
             516,
             500,
             28,
             ID_STATUS_LABEL,
+        );
+        state.credit_label = create_control(
+            window,
+            w!("STATIC"),
+            "by V037_",
+            WINDOW_STYLE(0),
+            56,
+            44,
+            150,
+            18,
+            ID_CREDIT_LABEL,
         );
         state.start_button = create_control(
             window,
@@ -971,6 +1004,7 @@ unsafe fn create_controls(window: HWND, state: &mut AppState) {
             state.select_image_button,
             state.clear_image_button,
             state.status_label,
+            state.credit_label,
             state.start_button,
             state.stop_button,
             state.close_button,
@@ -1252,6 +1286,7 @@ fn update_ui_font(state: &mut AppState, dpi: u32) {
 
     unsafe {
         for control in std::iter::once(state.main_heading)
+            .chain(std::iter::once(state.version_label))
             .chain(std::iter::once(state.settings_button))
             .chain(state.main_controls.iter().copied())
             .chain(state.settings_controls.iter().copied())
@@ -1472,6 +1507,20 @@ fn layout_controls(window: HWND, state: &AppState) {
             scale(32, s),
         );
         move_control(
+            state.version_label,
+            margin + scale(232, s),
+            scale(18, s),
+            scale(48, s),
+            scale(20, s),
+        );
+        move_control(
+            state.credit_label,
+            margin + scale(38, s),
+            scale(44, s),
+            scale(150, s),
+            scale(16, s),
+        );
+        move_control(
             state.settings_button,
             width - margin - scale(92, s),
             scale(10, s),
@@ -1482,28 +1531,28 @@ fn layout_controls(window: HWND, state: &AppState) {
             .worker
             .as_ref()
             .is_some_and(|worker| worker.running.load(Ordering::Acquire));
-        let preview_top = scale(124, s);
+        let preview_top = scale(138, s);
         let preview_height =
             (height - preview_top - scale(160, s)).clamp(scale(80, s), scale(132, s));
         let preview_bottom = preview_top + preview_height;
         move_control(
             state.slot_label,
             margin,
-            scale(48, s),
+            scale(62, s),
             scale(130, s),
             scale(20, s),
         );
         move_control(
             state.slot_combo,
             margin,
-            scale(70, s),
+            scale(84, s),
             content_width,
             scale(220, s),
         );
         move_control(
             state.preview_label,
             margin,
-            scale(100, s),
+            scale(114, s),
             content_width,
             scale(18, s),
         );
@@ -1593,7 +1642,6 @@ fn layout_controls(window: HWND, state: &AppState) {
             content_width,
             scale(20, s),
         );
-
         move_control(
             state.settings_title,
             margin,
@@ -1702,7 +1750,13 @@ unsafe extern "system" fn window_proc(
             let (background, default_text) = state.theme.colors();
             let control_id =
                 usize::try_from(GetDlgCtrlID(HWND(lparam.0 as *mut _))).unwrap_or_default();
-            let text = if [
+            let text = if control_id == ID_CREDIT_LABEL {
+                let brightness = (background.0 & 0xff)
+                    + ((background.0 >> 8) & 0xff)
+                    + ((background.0 >> 16) & 0xff);
+                let shade = if brightness > 3 * 127 { 190 } else { 112 };
+                COLORREF(rgb(shade, shade, shade))
+            } else if [
                 ID_SLOT_LABEL,
                 ID_PREVIEW_LABEL,
                 ID_STATUS_LABEL,
@@ -2006,6 +2060,7 @@ pub(super) fn run() {
             }
         };
         let class = WNDCLASSW {
+            style: CS_HREDRAW | CS_VREDRAW,
             lpfnWndProc: Some(window_proc),
             hInstance: instance,
             hCursor: cursor,
@@ -2031,7 +2086,7 @@ pub(super) fn run() {
             WINDOW_EX_STYLE(0),
             WINDOW_CLASS,
             WINDOW_TITLE,
-            WS_POPUP | WS_THICKFRAME | WS_VISIBLE,
+            WS_POPUP | WS_THICKFRAME | WS_CLIPCHILDREN | WS_VISIBLE,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             scale(450, initial_scale),
