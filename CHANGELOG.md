@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.3.0] - 2026-10-18 (Experimental)
+
+> **Note:** This is an experimental release featuring GPU-accelerated screen capture and the PolyForm Noncommercial License.
+
+### Added
+
+- **GPU-Accelerated Screen Capture**: Integrated DirectX 11 / DXGI Desktop Duplication (`IDXGIOutputDuplication`) delivering sub-millisecond to ~4ms frame capture directly from GPU memory.
+- **Smart Display Selection**: Automatic multi-monitor enumeration with primary monitor prioritization and desktop coordinate translation.
+- **Static Frame Optimization**: Instantaneous ~0ms reuse when the desktop image has not changed (`DXGI_ERROR_WAIT_TIMEOUT`).
+- **Transparent GDI Fallback**: Automatic, resilient fallback to GDI `BitBlt` if DXGI is unavailable or during desktop security state transitions.
+- **License**: Adopted the PolyForm Noncommercial License 1.0.0 (`PolyForm-Noncommercial-1.0.0`).
+
+### Fixed
+
+- **Graceful Scanner Loop**: Handled `corrmatch` `NoCandidates` condition as a normal "target not on screen" scan cycle instead of halting with an error dialog.
+
 ## [1.2.2] - 2026-10-18 (Beta)
 
 > **Note:** This is a beta preview release featuring the new Behavior Tree Logic Builder and redesigned modular dashboard.

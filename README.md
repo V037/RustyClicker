@@ -2,7 +2,7 @@
 
 # RustyClicker  <img alt="GitHub code size in bytes" src="https://img.shields.io/github/languages/code-size/V037/RustyClicker">
 
-**Version:** v1.2.2 (Beta)
+**Version:** v1.3.0 (Experimental)
 
 RustyClicker is a lightweight Windows autoclicker written in Rust. It watches
 the screen for selected image targets and clicks the center of a target when it

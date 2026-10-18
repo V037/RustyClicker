@@ -9,8 +9,8 @@ before acting: release details and working-tree state can change.
 - Repository: `V037/RustyClicker`
 - Main development branch: `rust_impl`
 - The legacy `opencv_version` branch has been deleted both locally and remotely on GitHub.
-- Current release tag: **v1.2.2 (Beta)**
-- Binary target: Native Windows x64 executable, size ~791 KB (< 1 MB).
+- Current release tag: **v1.3.0 (Experimental)**
+- Binary target: Native Windows x64 executable, size ~796 KB (< 1 MB).
 - GUI Framework Decision: Retained native Win32 API (`windows-rs`) instead of `egui` to strictly satisfy the < 1 MB size budget and zero GPU gaming overhead.
 
 ## What the app does
