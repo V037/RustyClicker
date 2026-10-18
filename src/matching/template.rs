@@ -91,9 +91,17 @@ impl PreparedTemplate {
         let image = corrmatch::ImageView::from_slice(screen_gray, width, height)
             .map_err(|error| CoreError::MatcherInput(error.to_string()))?;
         let pool = match_pool(thread_count)?;
-        let result = pool
-            .install(|| matcher.match_image(image))
-            .map_err(|error| CoreError::MatcherExecution(error.to_string()))?;
+        let result = match pool.install(|| matcher.match_image(image)) {
+            Ok(result) => result,
+            Err(corrmatch::CorrMatchError::NoCandidates { .. }) => return Ok(None),
+            Err(error) => {
+                let msg = error.to_string();
+                if msg.contains("no candidates") {
+                    return Ok(None);
+                }
+                return Err(CoreError::MatcherExecution(msg));
+            }
+        };
         if stop.is_some_and(|flag| flag.load(Ordering::Acquire)) || result.score <= confidence {
             return Ok(None);
         }

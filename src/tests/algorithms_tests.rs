@@ -357,3 +357,14 @@ fn ui_dimensions_scale_with_windows_dpi() {
     assert_eq!(scale(100, 1.0), 100);
     assert_eq!(scale(100, 1.5), 150);
 }
+
+#[test]
+fn corrmatch_on_blank_screen() {
+    let template_img = RgbaImage::from_fn(16, 16, |x, y| {
+        Rgba([((x * 47 + y * 17) % 256) as u8, 120, 200, 255])
+    });
+    let template = PreparedTemplate::new(template_img).unwrap();
+    let blank_gray = vec![0u8; 100 * 100];
+    let res = template.find_match(&blank_gray, 100, 100, 0.90, None, 1);
+    assert_eq!(res, Ok(None));
+}
