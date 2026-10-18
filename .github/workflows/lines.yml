@@ -1,11 +1,32 @@
-steps:
-  - uses: actions/checkout@v4
-  
-  - name: Make Code Badge
-    uses: shadowmoose/GHA-LoC-Badge@1.0.0
-    id: badge
-    with:
-      debug: true
-      directory: ./
-      badge: ./output/badge.svg
-      ignore: 'node_modules' # Add folders you want to ignore
+name: Generate LoC Badge
+
+on:
+  push:
+    branches: [ main ] # Runs when you push to the main branch
+  workflow_dispatch:   # Allows you to run it manually from the Actions tab
+
+permissions:
+  contents: write      # Required to save the badge to your repo
+
+jobs:
+  update-badge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Make Code Badge
+        uses: shadowmoose/GHA-LoC-Badge@1.0.0
+        id: badge
+        with:
+          debug: true
+          directory: ./
+          badge: ./output/badge.svg
+          ignore: 'node_modules'
+          
+      - name: Commit and push badge
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add ./output/badge.svg
+          git commit -m "Update LoC badge" || echo "No changes to commit"
+          git push
