@@ -32,9 +32,9 @@ use windows::{
                 CreateDIBSection, CreateFontW, CreatePen, CreateSolidBrush, DEFAULT_CHARSET,
                 DEFAULT_PITCH, DEFAULT_QUALITY, DIB_RGB_COLORS, DT_CENTER, DT_SINGLELINE,
                 DT_VCENTER, DeleteObject, DrawTextW, FW_NORMAL, FillRect, GetDC, GetSysColorBrush,
-                HBRUSH, HDC, HFONT, HGDIOBJ, InvalidateRect, OUT_DEFAULT_PRECIS, PS_SOLID, Polygon,
-                ReleaseDC, RoundRect, ScreenToClient, SelectObject, SetBkColor, SetTextColor,
-                UpdateWindow,
+                HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ, HPEN, InvalidateRect, OUT_DEFAULT_PRECIS,
+                PS_SOLID, Polygon, ReleaseDC, RoundRect, ScreenToClient, SelectObject, SetBkColor,
+                SetTextColor, UpdateWindow,
             },
         },
         System::LibraryLoader::GetModuleHandleW,
@@ -101,6 +101,64 @@ const IMAGE_BITMAP: usize = 0;
 const fn rgb(red: u8, green: u8, blue: u8) -> u32 {
     red as u32 | (green as u32) << 8 | (blue as u32) << 16
 }
+
+trait GdiHandle: Copy + Default {
+    fn is_null(self) -> bool;
+    fn as_gdi_object(self) -> HGDIOBJ;
+}
+
+macro_rules! impl_gdi_handle {
+    ($($handle:ty),+ $(,)?) => {
+        $(
+            impl GdiHandle for $handle {
+                fn is_null(self) -> bool {
+                    self.0.is_null()
+                }
+
+                fn as_gdi_object(self) -> HGDIOBJ {
+                    HGDIOBJ(self.0)
+                }
+            }
+        )+
+    };
+}
+
+impl_gdi_handle!(HBRUSH, HBITMAP, HFONT, HPEN);
+
+struct OwnedGdiObject<T: GdiHandle> {
+    handle: T,
+}
+
+impl<T: GdiHandle> OwnedGdiObject<T> {
+    fn new(handle: T) -> Self {
+        Self { handle }
+    }
+
+    fn get(&self) -> T {
+        self.handle
+    }
+
+    fn is_null(&self) -> bool {
+        self.handle.is_null()
+    }
+}
+
+impl<T: GdiHandle> Default for OwnedGdiObject<T> {
+    fn default() -> Self {
+        Self::new(T::default())
+    }
+}
+
+impl<T: GdiHandle> Drop for OwnedGdiObject<T> {
+    fn drop(&mut self) {
+        if !self.handle.is_null() {
+            unsafe {
+                let _ = DeleteObject(self.handle.as_gdi_object());
+            }
+        }
+    }
+}
+
 struct AppState {
     paths: [Option<PathBuf>; MAX_IMAGE_COUNT],
     image_count: usize,
@@ -130,28 +188,30 @@ struct AppState {
     slot_count_combo: HWND,
     settings_open: bool,
     selected_slot: usize,
-    preview_bitmap: windows::Win32::Graphics::Gdi::HBITMAP,
+    preview_bitmap: OwnedGdiObject<HBITMAP>,
     preview_source: Option<image::DynamicImage>,
     always_on_top: bool,
     click_delay_ms: u64,
     theme: Theme,
-    background_brush: HBRUSH,
-    surface_brush: HBRUSH,
-    font: HFONT,
-    heading_font: HFONT,
+    background_brush: OwnedGdiObject<HBRUSH>,
+    surface_brush: OwnedGdiObject<HBRUSH>,
+    font: OwnedGdiObject<HFONT>,
+    heading_font: OwnedGdiObject<HFONT>,
     dpi_scale: f32,
-    preferences_path: PathBuf,
+    preferences_path: Option<PathBuf>,
     worker: Option<Arc<WorkerState>>,
 }
 
 impl AppState {
     /// Loads saved preferences and initializes native-window state before controls are created.
     fn new() -> Self {
-        let application_dir = std::env::current_exe()
-            .ok()
-            .and_then(|path| path.parent().map(Path::to_path_buf))
-            .unwrap_or_else(|| PathBuf::from("."));
-        let preferences_path = application_dir.join("image_clicker_preferences.json");
+        let preferences_path = std::env::var_os("APPDATA")
+            .or_else(|| std::env::var_os("LOCALAPPDATA"))
+            .map(|directory| {
+                PathBuf::from(directory)
+                    .join("RustyClicker")
+                    .join("rusty_clicker.json")
+            });
         let mut state = Self {
             paths: std::array::from_fn(|_| None),
             image_count: DEFAULT_IMAGE_COUNT,
@@ -181,15 +241,15 @@ impl AppState {
             slot_count_combo: HWND::default(),
             settings_open: false,
             selected_slot: 0,
-            preview_bitmap: windows::Win32::Graphics::Gdi::HBITMAP::default(),
+            preview_bitmap: OwnedGdiObject::default(),
             preview_source: None,
             always_on_top: false,
             click_delay_ms: default_click_delay_ms(),
             theme: Theme::default(),
-            background_brush: HBRUSH::default(),
-            surface_brush: HBRUSH::default(),
-            font: HFONT::default(),
-            heading_font: HFONT::default(),
+            background_brush: OwnedGdiObject::default(),
+            surface_brush: OwnedGdiObject::default(),
+            font: OwnedGdiObject::default(),
+            heading_font: OwnedGdiObject::default(),
             dpi_scale: 1.0,
             preferences_path,
             worker: None,
@@ -199,9 +259,35 @@ impl AppState {
     }
 
     fn load_preferences(&mut self) {
-        let contents = match fs::read(&self.preferences_path) {
-            Ok(contents) => contents,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        let Some(preferences_path) = &self.preferences_path else {
+            self.show_message(
+                "Could not find a Windows app-data folder for saving preferences.",
+                MB_ICONWARNING,
+            );
+            return;
+        };
+        let (contents, migrate_legacy_preferences) = match fs::read(preferences_path) {
+            Ok(contents) => (contents, false),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let Some(legacy_path) = std::env::current_exe()
+                    .ok()
+                    .and_then(|path| path.parent().map(Path::to_path_buf))
+                    .map(|directory| directory.join("image_clicker_preferences.json"))
+                else {
+                    return;
+                };
+                match fs::read(legacy_path) {
+                    Ok(contents) => (contents, true),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+                    Err(error) => {
+                        self.show_message(
+                            &format!("Could not read saved preferences: {error}"),
+                            MB_ICONWARNING,
+                        );
+                        return;
+                    }
+                }
+            }
             Err(error) => {
                 self.show_message(
                     &format!("Could not read saved preferences: {error}"),
@@ -248,6 +334,9 @@ impl AppState {
                 MB_ICONWARNING,
             );
         }
+        if migrate_legacy_preferences {
+            self.save_preferences();
+        }
     }
 
     fn save_preferences(&self) {
@@ -275,11 +364,30 @@ impl AppState {
                 return;
             }
         };
-        if let Err(error) = fs::write(&self.preferences_path, contents) {
+        let Some(preferences_path) = &self.preferences_path else {
+            self.show_message(
+                "Could not find a Windows app-data folder for saving preferences.",
+                MB_ICONERROR,
+            );
+            return;
+        };
+        if let Some(directory) = preferences_path.parent()
+            && let Err(error) = fs::create_dir_all(directory)
+        {
+            self.show_message(
+                &format!(
+                    "Could not create preferences folder {}: {error}",
+                    directory.display()
+                ),
+                MB_ICONERROR,
+            );
+            return;
+        }
+        if let Err(error) = fs::write(preferences_path, contents) {
             self.show_message(
                 &format!(
                     "Could not save preferences to {}: {error}",
-                    self.preferences_path.display()
+                    preferences_path.display()
                 ),
                 MB_ICONERROR,
             );
@@ -403,10 +511,7 @@ impl AppState {
                 Some(WPARAM(IMAGE_BITMAP)),
                 Some(LPARAM(0)),
             );
-            if !self.preview_bitmap.0.is_null() {
-                let _ = DeleteObject(HGDIOBJ(self.preview_bitmap.0));
-                self.preview_bitmap = windows::Win32::Graphics::Gdi::HBITMAP::default();
-            }
+            self.preview_bitmap = OwnedGdiObject::default();
         }
     }
 
@@ -455,10 +560,8 @@ impl AppState {
             ReleaseDC(Some(window), dc);
         }
         let bitmap = bitmap.map_err(|error| format!("Could not create image preview: {error}"))?;
+        let bitmap = OwnedGdiObject::new(bitmap);
         if bits.is_null() {
-            unsafe {
-                let _ = DeleteObject(HGDIOBJ(bitmap.0));
-            }
             return Err("Windows did not provide image preview memory.".to_owned());
         }
         unsafe {
@@ -467,13 +570,10 @@ impl AppState {
                 self.preview,
                 STM_SETIMAGE,
                 Some(WPARAM(IMAGE_BITMAP)),
-                Some(LPARAM(bitmap.0 as isize)),
+                Some(LPARAM(bitmap.get().0 as isize)),
             );
             let _ = InvalidateRect(Some(self.preview), None, true);
             let _ = UpdateWindow(self.preview);
-            if !self.preview_bitmap.0.is_null() {
-                let _ = DeleteObject(HGDIOBJ(self.preview_bitmap.0));
-            }
         }
         self.preview_bitmap = bitmap;
         Ok(())
@@ -1195,7 +1295,7 @@ unsafe fn create_controls(window: HWND, state: &mut AppState) {
         );
         state.background_brush = state.theme.brush();
         state.surface_brush = state.theme.surface_brush();
-        if state.background_brush.0.is_null() || state.surface_brush.0.is_null() {
+        if state.background_brush.is_null() || state.surface_brush.is_null() {
             state.show_message("Could not create the window background.", MB_ICONERROR);
         }
         for control in &state.settings_controls {
@@ -1236,7 +1336,7 @@ pub(crate) fn scale(value: i32, factor: f32) -> i32 {
 }
 
 fn update_ui_font(state: &mut AppState, dpi: u32) {
-    let font = unsafe {
+    let font = OwnedGdiObject::new(unsafe {
         CreateFontW(
             -((10 * dpi as i32 + 36) / 72),
             0,
@@ -1253,12 +1353,12 @@ fn update_ui_font(state: &mut AppState, dpi: u32) {
             DEFAULT_PITCH.0 as u32,
             w!("Segoe UI"),
         )
-    };
-    if font.0.is_null() {
+    });
+    if font.is_null() {
         state.show_message("Could not create the application font.", MB_ICONERROR);
         return;
     }
-    let heading_font = unsafe {
+    let heading_font = OwnedGdiObject::new(unsafe {
         CreateFontW(
             -((18 * dpi as i32 + 36) / 72),
             0,
@@ -1275,11 +1375,8 @@ fn update_ui_font(state: &mut AppState, dpi: u32) {
             DEFAULT_PITCH.0 as u32,
             w!("Segoe UI"),
         )
-    };
-    if heading_font.0.is_null() {
-        unsafe {
-            let _ = DeleteObject(HGDIOBJ(font.0));
-        }
+    });
+    if heading_font.is_null() {
         state.show_message("Could not create the heading font.", MB_ICONERROR);
         return;
     }
@@ -1294,7 +1391,7 @@ fn update_ui_font(state: &mut AppState, dpi: u32) {
             SendMessageW(
                 control,
                 WM_SETFONT,
-                Some(WPARAM(font.0 as usize)),
+                Some(WPARAM(font.get().0 as usize)),
                 Some(LPARAM(1)),
             );
         }
@@ -1302,15 +1399,9 @@ fn update_ui_font(state: &mut AppState, dpi: u32) {
             SendMessageW(
                 control,
                 WM_SETFONT,
-                Some(WPARAM(heading_font.0 as usize)),
+                Some(WPARAM(heading_font.get().0 as usize)),
                 Some(LPARAM(1)),
             );
-        }
-        if !state.font.0.is_null() {
-            let _ = DeleteObject(HGDIOBJ(state.font.0));
-        }
-        if !state.heading_font.0.is_null() {
-            let _ = DeleteObject(HGDIOBJ(state.heading_font.0));
         }
     }
     state.font = font;
@@ -1330,25 +1421,17 @@ unsafe fn draw_button(state: &AppState, item: &DRAWITEMSTRUCT) {
     let (fill, text, border) = state
         .theme
         .button_colors(usize::try_from(item.CtlID).unwrap_or_default(), selected);
-    let fill_brush = unsafe { CreateSolidBrush(COLORREF(fill)) };
-    let border_pen = unsafe { CreatePen(PS_SOLID, scale(1, state.dpi_scale), COLORREF(border)) };
-    if fill_brush.0.is_null() || border_pen.0.is_null() {
-        if !fill_brush.0.is_null() {
-            unsafe {
-                let _ = DeleteObject(HGDIOBJ(fill_brush.0));
-            }
-        }
-        if !border_pen.0.is_null() {
-            unsafe {
-                let _ = DeleteObject(HGDIOBJ(border_pen.0));
-            }
-        }
+    let fill_brush = OwnedGdiObject::new(unsafe { CreateSolidBrush(COLORREF(fill)) });
+    let border_pen = OwnedGdiObject::new(unsafe {
+        CreatePen(PS_SOLID, scale(1, state.dpi_scale), COLORREF(border))
+    });
+    if fill_brush.is_null() || border_pen.is_null() {
         return;
     }
 
     unsafe {
-        let old_brush = SelectObject(item.hDC, HGDIOBJ(fill_brush.0));
-        let old_pen = SelectObject(item.hDC, HGDIOBJ(border_pen.0));
+        let old_brush = SelectObject(item.hDC, fill_brush.get().as_gdi_object());
+        let old_pen = SelectObject(item.hDC, border_pen.get().as_gdi_object());
         let _ = RoundRect(
             item.hDC,
             item.rcItem.left + 1,
@@ -1375,8 +1458,6 @@ unsafe fn draw_button(state: &AppState, item: &DRAWITEMSTRUCT) {
                 DT_CENTER | DT_VCENTER | DT_SINGLELINE,
             );
         }
-        let _ = DeleteObject(HGDIOBJ(fill_brush.0));
-        let _ = DeleteObject(HGDIOBJ(border_pen.0));
     }
 }
 
@@ -1385,32 +1466,25 @@ unsafe fn draw_cursor_icon(state: &AppState, item: &DRAWITEMSTRUCT) {
     let y = item.rcItem.top;
     let width = item.rcItem.right - x;
     let height = item.rcItem.bottom - y;
-    let outline = unsafe { CreateSolidBrush(COLORREF(rgb(52, 35, 24))) };
-    let rust = unsafe { CreateSolidBrush(COLORREF(rgb(173, 83, 43))) };
-    let outline_pen = unsafe {
+    let outline = OwnedGdiObject::new(unsafe { CreateSolidBrush(COLORREF(rgb(52, 35, 24))) });
+    let rust = OwnedGdiObject::new(unsafe { CreateSolidBrush(COLORREF(rgb(173, 83, 43))) });
+    let outline_pen = OwnedGdiObject::new(unsafe {
         CreatePen(
             PS_SOLID,
             scale(1, state.dpi_scale),
             COLORREF(rgb(37, 27, 21)),
         )
-    };
-    if outline.0.is_null() || rust.0.is_null() || outline_pen.0.is_null() {
-        for object in [HGDIOBJ(outline.0), HGDIOBJ(rust.0), HGDIOBJ(outline_pen.0)] {
-            if !object.0.is_null() {
-                unsafe {
-                    let _ = DeleteObject(object);
-                }
-            }
-        }
+    });
+    if outline.is_null() || rust.is_null() || outline_pen.is_null() {
         return;
     }
 
     unsafe {
-        if !state.background_brush.0.is_null() {
-            let _ = FillRect(item.hDC, &item.rcItem, state.background_brush);
+        if !state.background_brush.is_null() {
+            let _ = FillRect(item.hDC, &item.rcItem, state.background_brush.get());
         }
-        let old_brush = SelectObject(item.hDC, HGDIOBJ(outline.0));
-        let old_pen = SelectObject(item.hDC, HGDIOBJ(outline_pen.0));
+        let old_brush = SelectObject(item.hDC, outline.get().as_gdi_object());
+        let old_pen = SelectObject(item.hDC, outline_pen.get().as_gdi_object());
         let outer = [
             POINT { x: x + 3, y: y + 2 },
             POINT {
@@ -1456,13 +1530,10 @@ unsafe fn draw_cursor_icon(state: &AppState, item: &DRAWITEMSTRUCT) {
             },
             POINT { x: x + 6, y: y + 7 },
         ];
-        SelectObject(item.hDC, HGDIOBJ(rust.0));
+        SelectObject(item.hDC, rust.get().as_gdi_object());
         let _ = Polygon(item.hDC, &inner);
         SelectObject(item.hDC, old_brush);
         SelectObject(item.hDC, old_pen);
-        let _ = DeleteObject(HGDIOBJ(outline.0));
-        let _ = DeleteObject(HGDIOBJ(rust.0));
-        let _ = DeleteObject(HGDIOBJ(outline_pen.0));
     }
 }
 
@@ -1471,7 +1542,7 @@ unsafe fn draw_empty_preview(state: &AppState, item: &DRAWITEMSTRUCT) {
     let mut text: Vec<u16> = "No image selected".encode_utf16().collect();
     let mut text_rect = item.rcItem;
     unsafe {
-        let _ = FillRect(item.hDC, &item.rcItem, state.background_brush);
+        let _ = FillRect(item.hDC, &item.rcItem, state.background_brush.get());
         SetBkColor(item.hDC, state.theme.colors().0);
         SetTextColor(item.hDC, text_color);
         DrawTextW(
@@ -1742,14 +1813,18 @@ unsafe extern "system" fn window_proc(
             return DefWindowProcW(window, message, wparam, lparam);
         }
         let state = &mut *state_ptr;
-        if message == WM_ERASEBKGND && !state.background_brush.0.is_null() {
+        if message == WM_ERASEBKGND && !state.background_brush.is_null() {
             let mut client = RECT::default();
             if GetClientRect(window, &mut client).is_ok() {
-                FillRect(HDC(wparam.0 as *mut _), &client, state.background_brush);
+                FillRect(
+                    HDC(wparam.0 as *mut _),
+                    &client,
+                    state.background_brush.get(),
+                );
             }
             return LRESULT(1);
         }
-        if message == WM_CTLCOLORSTATIC && !state.background_brush.0.is_null() {
+        if message == WM_CTLCOLORSTATIC && !state.background_brush.is_null() {
             let (background, default_text) = state.theme.colors();
             let control_id =
                 usize::try_from(GetDlgCtrlID(HWND(lparam.0 as *mut _))).unwrap_or_default();
@@ -1775,16 +1850,16 @@ unsafe extern "system" fn window_proc(
             };
             SetBkColor(HDC(wparam.0 as *mut _), background);
             SetTextColor(HDC(wparam.0 as *mut _), text);
-            return LRESULT(state.background_brush.0 as isize);
+            return LRESULT(state.background_brush.get().0 as isize);
         }
-        if message == WM_CTLCOLORBTN && !state.background_brush.0.is_null() {
+        if message == WM_CTLCOLORBTN && !state.background_brush.is_null() {
             let (background, text) = state.theme.colors();
             SetBkColor(HDC(wparam.0 as *mut _), background);
             SetTextColor(HDC(wparam.0 as *mut _), text);
-            return LRESULT(state.background_brush.0 as isize);
+            return LRESULT(state.background_brush.get().0 as isize);
         }
         if (message == WM_CTLCOLOREDIT || message == WM_CTLCOLORLISTBOX)
-            && !state.surface_brush.0.is_null()
+            && !state.surface_brush.is_null()
         {
             let (_, text) = state.theme.colors();
             SetBkColor(
@@ -1792,7 +1867,7 @@ unsafe extern "system" fn window_proc(
                 COLORREF(state.theme.surface_color()),
             );
             SetTextColor(HDC(wparam.0 as *mut _), text);
-            return LRESULT(state.surface_brush.0 as isize);
+            return LRESULT(state.surface_brush.get().0 as isize);
         }
         if message == WM_GETMINMAXINFO {
             let sizing = &mut *(lparam.0 as *mut MINMAXINFO);
@@ -1996,26 +2071,6 @@ unsafe extern "system" fn window_proc(
                 let _ = windows::Win32::UI::WindowsAndMessaging::KillTimer(Some(window), TIMER_ID);
                 for id in 1..=3 {
                     let _ = UnregisterHotKey(Some(window), id);
-                }
-                if !state.background_brush.0.is_null() {
-                    let _ = DeleteObject(HGDIOBJ(state.background_brush.0));
-                    state.background_brush = HBRUSH::default();
-                }
-                if !state.surface_brush.0.is_null() {
-                    let _ = DeleteObject(HGDIOBJ(state.surface_brush.0));
-                    state.surface_brush = HBRUSH::default();
-                }
-                if !state.font.0.is_null() {
-                    let _ = DeleteObject(HGDIOBJ(state.font.0));
-                    state.font = HFONT::default();
-                }
-                if !state.heading_font.0.is_null() {
-                    let _ = DeleteObject(HGDIOBJ(state.heading_font.0));
-                    state.heading_font = HFONT::default();
-                }
-                if !state.preview_bitmap.0.is_null() {
-                    let _ = DeleteObject(HGDIOBJ(state.preview_bitmap.0));
-                    state.preview_bitmap = windows::Win32::Graphics::Gdi::HBITMAP::default();
                 }
                 PostQuitMessage(0);
                 LRESULT(0)

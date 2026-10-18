@@ -1,6 +1,6 @@
 # RustyClicker
 
-**Version:** v1.0.1
+**Version:** v1.1
 
 RustyClicker is a lightweight Windows autoclicker written in Rust. It watches
 the screen for selected image targets and clicks the center of a target when it
@@ -19,6 +19,8 @@ finds one.
 - Use a persistent two-thread Rayon pool and SIMD-enabled matching without an
   OpenCV runtime dependency.
 - Build a standalone executable with the rusty-cursor icon embedded.
+- Store preferences in the per-user Windows app-data folder, independently of
+  the executable location.
 
 ## Build
 

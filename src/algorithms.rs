@@ -18,7 +18,10 @@ use windows::Win32::{
         ReleaseDC, SRCCOPY, SelectObject,
     },
     UI::{
-        Input::KeyboardAndMouse::{MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, mouse_event},
+        Input::KeyboardAndMouse::{
+            INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEINPUT,
+            SendInput,
+        },
         WindowsAndMessaging::{
             GetCursorPos, GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
             SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SetCursorPos,
@@ -225,8 +228,10 @@ pub(crate) fn run_clicker(templates: Vec<PreparedTemplate>, worker: Arc<WorkerSt
                     error_message = Some("Could not move the mouse cursor.".to_owned());
                     break;
                 }
-                mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-                mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                if let Err(error) = send_left_click() {
+                    error_message = Some(error);
+                    break;
+                }
             }
             click_count += 1;
             worker.clicks.store(click_count, Ordering::Relaxed);
@@ -339,6 +344,55 @@ fn find_template(
 
     let screen_gray = rgb_to_gray(screenshot.as_raw(), screen_width, screen_height)?;
     template.find_match(&screen_gray, screen_width, screen_height, confidence, stop)
+}
+
+fn send_left_click() -> Result<(), String> {
+    let input_size = std::mem::size_of::<INPUT>() as i32;
+    let inputs = [
+        INPUT {
+            r#type: INPUT_MOUSE,
+            Anonymous: INPUT_0 {
+                mi: MOUSEINPUT {
+                    dwFlags: MOUSEEVENTF_LEFTDOWN,
+                    ..Default::default()
+                },
+            },
+        },
+        INPUT {
+            r#type: INPUT_MOUSE,
+            Anonymous: INPUT_0 {
+                mi: MOUSEINPUT {
+                    dwFlags: MOUSEEVENTF_LEFTUP,
+                    ..Default::default()
+                },
+            },
+        },
+    ];
+    let inserted = unsafe { SendInput(&inputs, input_size) };
+    if inserted == inputs.len() as u32 {
+        return Ok(());
+    }
+
+    if inserted > 0 {
+        let release = INPUT {
+            r#type: INPUT_MOUSE,
+            Anonymous: INPUT_0 {
+                mi: MOUSEINPUT {
+                    dwFlags: MOUSEEVENTF_LEFTUP,
+                    ..Default::default()
+                },
+            },
+        };
+        if unsafe { SendInput(&[release], input_size) } != 1 {
+            return Err(
+                "Windows accepted only part of the mouse click and could not release the button."
+                    .to_owned(),
+            );
+        }
+    }
+    Err(format!(
+        "Windows accepted only {inserted} of 2 mouse click events."
+    ))
 }
 
 struct ScreenCapture {

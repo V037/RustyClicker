@@ -133,13 +133,13 @@ impl Theme {
         }
     }
 
-    pub(super) fn brush(self) -> HBRUSH {
+    pub(super) fn brush(self) -> OwnedGdiObject<HBRUSH> {
         let (background, _) = self.colors();
-        unsafe { CreateSolidBrush(background) }
+        OwnedGdiObject::new(unsafe { CreateSolidBrush(background) })
     }
 
-    pub(super) fn surface_brush(self) -> HBRUSH {
-        unsafe { CreateSolidBrush(COLORREF(self.surface_color())) }
+    pub(super) fn surface_brush(self) -> OwnedGdiObject<HBRUSH> {
+        OwnedGdiObject::new(unsafe { CreateSolidBrush(COLORREF(self.surface_color())) })
     }
 
     pub(super) fn surface_color(self) -> u32 {
@@ -216,21 +216,9 @@ impl AppState {
         unsafe {
             let new_brush = theme.brush();
             let new_surface_brush = theme.surface_brush();
-            if new_brush.0.is_null() || new_surface_brush.0.is_null() {
-                if !new_brush.0.is_null() {
-                    let _ = DeleteObject(HGDIOBJ(new_brush.0));
-                }
-                if !new_surface_brush.0.is_null() {
-                    let _ = DeleteObject(HGDIOBJ(new_surface_brush.0));
-                }
+            if new_brush.is_null() || new_surface_brush.is_null() {
                 self.show_message("Could not create the window-color brush.", MB_ICONERROR);
                 return;
-            }
-            if !self.background_brush.0.is_null() {
-                let _ = DeleteObject(HGDIOBJ(self.background_brush.0));
-            }
-            if !self.surface_brush.0.is_null() {
-                let _ = DeleteObject(HGDIOBJ(self.surface_brush.0));
             }
             self.theme = theme;
             self.background_brush = new_brush;
