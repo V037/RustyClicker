@@ -6,6 +6,7 @@ pub(super) const DEFAULT_IMAGE_COUNT: usize = 10;
 pub(super) const ID_SETTINGS_DELAY_LABEL: usize = 300;
 pub(super) const ID_SETTINGS_THEME_LABEL: usize = 301;
 pub(super) const ID_SETTINGS_SLOT_COUNT_LABEL: usize = 305;
+pub(super) const ID_SETTINGS_THREADS_LABEL: usize = 309;
 pub(super) const THEMES: [Theme; 5] = [
     Theme::Light,
     Theme::Dark,
@@ -25,7 +26,7 @@ pub(crate) enum Theme {
     Purple,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize)]
 pub(crate) struct Preferences {
     #[serde(default)]
     pub(crate) image_paths: Vec<Option<String>>,
@@ -33,14 +34,33 @@ pub(crate) struct Preferences {
     pub(crate) always_on_top: bool,
     #[serde(default = "default_click_delay_ms")]
     pub(crate) click_delay_ms: u64,
+    #[serde(default = "default_match_threads")]
+    pub(crate) match_threads: usize,
     #[serde(default)]
     pub(crate) theme: Theme,
     #[serde(default = "default_image_count")]
     pub(crate) image_count: usize,
 }
 
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            image_paths: Vec::new(),
+            always_on_top: false,
+            click_delay_ms: default_click_delay_ms(),
+            match_threads: default_match_threads(),
+            theme: Theme::default(),
+            image_count: default_image_count(),
+        }
+    }
+}
+
 const fn default_image_count() -> usize {
     DEFAULT_IMAGE_COUNT
+}
+
+const fn default_match_threads() -> usize {
+    DEFAULT_MATCH_THREADS
 }
 
 const fn rgb(red: u8, green: u8, blue: u8) -> u32 {
@@ -170,16 +190,36 @@ impl AppState {
         set_text(self.main_heading, "RustyClicker");
         set_text(self.settings_button, if open { "Back" } else { "Settings" });
         layout_controls(window, self);
+        if !open && let Err(error) = self.refresh_preview(window) {
+            self.show_message(&error, MB_ICONERROR);
+        }
     }
 
-    pub(super) fn set_click_delay(&mut self, selection: usize) {
-        let Some(delay) = CLICK_DELAYS_MS.get(selection).copied() else {
-            self.show_message("Select a valid click delay.", MB_ICONWARNING);
+    pub(super) fn set_click_delay(&mut self, delay: u64) {
+        if !(MIN_CLICK_DELAY_MS..=MAX_CLICK_DELAY_MS).contains(&delay) {
+            set_text(self.click_delay_input, &self.click_delay_ms.to_string());
+            self.show_message(
+                "Enter a click interval between 1 and 10000 milliseconds.",
+                MB_ICONWARNING,
+            );
             return;
-        };
+        }
         self.click_delay_ms = delay;
         if let Some(worker) = &self.worker {
             worker.click_delay_ms.store(delay, Ordering::Release);
+        }
+        set_text(self.click_delay_input, &delay.to_string());
+        self.save_preferences();
+    }
+
+    pub(super) fn set_match_threads(&mut self, selection: usize) {
+        let Some(threads) = MATCH_THREAD_OPTIONS.get(selection).copied() else {
+            self.show_message("Select a valid matching thread count.", MB_ICONWARNING);
+            return;
+        };
+        self.match_threads = threads;
+        if let Some(worker) = &self.worker {
+            worker.match_threads.store(threads, Ordering::Release);
         }
         self.save_preferences();
     }

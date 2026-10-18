@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.2.0] - 2026-10-18
+
+### Fixed
+
+- Restore the selected image preview when returning from Settings to the main
+  view.
+- Remove the redundant “Back to images” button; the top-right Back button is
+  the single Settings navigation control.
+- Fix settings label styling so the click interval label uses normal text size
+  and the scanning-thread label follows the active theme accent.
+
+### Changed
+
+- Replace the click-interval dropdown with an integer field accepting 1–10,000
+  ms, defaulting to 100 ms.
+- Add a persisted matching-thread selector for 1, 2, 4, or 8 Rayon threads,
+  defaulting to 2.
+- Replace string-based core matching, capture, and click failures with typed
+  errors, retaining error categories through the worker and formatting them
+  into user-facing messages at the UI boundary.
+
 ## [1.1.0] - 2026-10-18
 
 ### Added

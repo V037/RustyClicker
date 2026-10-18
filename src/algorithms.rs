@@ -3,9 +3,10 @@ use image::RgbImage;
 use image::RgbaImage;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use std::{
+    fmt::{Display, Formatter},
     sync::{
         Arc, Mutex, OnceLock,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     thread,
     time::{Duration, Instant},
@@ -31,8 +32,144 @@ use windows::Win32::{
 
 const MATCH_CONFIDENCE: f32 = 0.90;
 const SCAN_INTERVAL: Duration = Duration::from_millis(10);
-const MATCH_THREADS: usize = 2;
-pub(crate) const CLICK_DELAYS_MS: [u64; 7] = [25, 50, 100, 250, 500, 1_000, 2_000];
+pub(crate) const MATCH_THREAD_OPTIONS: [usize; 4] = [1, 2, 4, 8];
+pub(crate) const DEFAULT_MATCH_THREADS: usize = 2;
+pub(crate) const DEFAULT_CLICK_DELAY_MS: u64 = 100;
+pub(crate) const MIN_CLICK_DELAY_MS: u64 = 1;
+pub(crate) const MAX_CLICK_DELAY_MS: u64 = 10_000;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum CoreError {
+    InvalidImageDimensions,
+    DimensionsTooLarge(&'static str),
+    InvalidPixelBuffer {
+        format: &'static str,
+        expected: usize,
+        actual: usize,
+    },
+    TemplateCreation(String),
+    TemplateCompilation(String),
+    MatcherInput(String),
+    MatcherExecution(String),
+    MatcherPool(String),
+    UnsupportedThreadCount(usize),
+    ScreenCapture(Box<Self>),
+    CaptureDimensionsTooLarge,
+    CaptureScreenDeviceContext,
+    CaptureMemoryDeviceContext,
+    CaptureBitmap(String),
+    CaptureBitmapSelection,
+    CaptureScreenSize,
+    CaptureNotInitialized,
+    CapturePixels(String),
+    FailSafeTriggered,
+    CursorPosition,
+    CursorMove,
+    InputDelivery {
+        inserted: u32,
+        expected: u32,
+        release_failed: bool,
+    },
+}
+
+impl Display for CoreError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidImageDimensions => {
+                formatter.write_str("Image dimensions must be non-zero.")
+            }
+            Self::DimensionsTooLarge(context) => {
+                write!(formatter, "{context} dimensions are too large.")
+            }
+            Self::InvalidPixelBuffer {
+                format,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "{format} image data has {actual} bytes; expected {expected}."
+            ),
+            Self::TemplateCreation(error) => {
+                write!(
+                    formatter,
+                    "Could not create image matcher template: {error}"
+                )
+            }
+            Self::TemplateCompilation(error) => {
+                write!(
+                    formatter,
+                    "Could not compile image matcher template: {error}"
+                )
+            }
+            Self::MatcherInput(error) => {
+                write!(
+                    formatter,
+                    "Could not prepare screenshot for matching: {error}"
+                )
+            }
+            Self::MatcherExecution(error) => write!(formatter, "Image matching failed: {error}"),
+            Self::MatcherPool(error) => {
+                write!(
+                    formatter,
+                    "Could not initialize image-matching workers: {error}"
+                )
+            }
+            Self::UnsupportedThreadCount(threads) => {
+                write!(formatter, "Unsupported matching thread count: {threads}.")
+            }
+            Self::ScreenCapture(error) => write!(formatter, "Screen capture failed: {error}"),
+            Self::CaptureDimensionsTooLarge => {
+                formatter.write_str("Screen dimensions are too large to capture safely.")
+            }
+            Self::CaptureScreenDeviceContext => {
+                formatter.write_str("Could not get the screen device context.")
+            }
+            Self::CaptureMemoryDeviceContext => {
+                formatter.write_str("Could not create a compatible device context.")
+            }
+            Self::CaptureBitmap(error) => {
+                write!(
+                    formatter,
+                    "Could not create a direct-access screenshot bitmap: {error}"
+                )
+            }
+            Self::CaptureBitmapSelection => {
+                formatter.write_str("Could not select the screenshot bitmap.")
+            }
+            Self::CaptureScreenSize => {
+                formatter.write_str("Windows reported an invalid screen size.")
+            }
+            Self::CaptureNotInitialized => {
+                formatter.write_str("Could not initialize screen capture.")
+            }
+            Self::CapturePixels(error) => {
+                write!(formatter, "Could not copy screen pixels: {error}")
+            }
+            Self::FailSafeTriggered => {
+                formatter.write_str("Stopped by the fail-safe (mouse moved to a screen corner).")
+            }
+            Self::CursorPosition => {
+                formatter.write_str("Could not read the mouse cursor position.")
+            }
+            Self::CursorMove => formatter.write_str("Could not move the mouse cursor."),
+            Self::InputDelivery {
+                inserted,
+                expected: _,
+                release_failed,
+            } if *release_failed => formatter.write_str(
+                "Windows accepted only part of the mouse click and could not release the button.",
+            ),
+            Self::InputDelivery {
+                inserted, expected, ..
+            } => write!(
+                formatter,
+                "Windows accepted only {inserted} of {expected} mouse click events."
+            ),
+        }
+    }
+}
+
+impl std::error::Error for CoreError {}
 
 pub(crate) struct PreparedTemplate {
     pub(crate) width: u32,
@@ -43,10 +180,10 @@ pub(crate) struct PreparedTemplate {
 
 impl PreparedTemplate {
     /// Prepares a grayscale, mean-centered template for normalized correlation.
-    pub(crate) fn new(source: RgbaImage) -> Result<Self, String> {
+    pub(crate) fn new(source: RgbaImage) -> Result<Self, CoreError> {
         let (width, height) = source.dimensions();
         if width == 0 || height == 0 {
-            return Err("Image dimensions must be non-zero.".to_owned());
+            return Err(CoreError::InvalidImageDimensions);
         }
         let rgb: Vec<u8> = source
             .pixels()
@@ -65,17 +202,17 @@ impl PreparedTemplate {
             .sum();
         let gray_energy = gray_energy as f64;
         let width_usize =
-            usize::try_from(width).map_err(|_| "Image width exceeds platform limits.")?;
+            usize::try_from(width).map_err(|_| CoreError::DimensionsTooLarge("Image width"))?;
         let height_usize =
-            usize::try_from(height).map_err(|_| "Image height exceeds platform limits.")?;
+            usize::try_from(height).map_err(|_| CoreError::DimensionsTooLarge("Image height"))?;
         let matcher = if gray_energy > 1e-12 {
             let matcher_template = corrmatch::Template::new(gray, width_usize, height_usize)
-                .map_err(|error| format!("Could not create image matcher template: {error}"))?;
+                .map_err(|error| CoreError::TemplateCreation(error.to_string()))?;
             let mut compile_config = corrmatch::CompileConfigNoRot::default();
             compile_config.max_levels = 4;
             let compiled_template =
                 corrmatch::CompiledTemplate::compile_unrotated(&matcher_template, compile_config)
-                    .map_err(|error| format!("Could not compile image matcher template: {error}"))?;
+                    .map_err(|error| CoreError::TemplateCompilation(error.to_string()))?;
             let mut match_config = corrmatch::MatchConfig::default();
             match_config.parallel = true;
             match_config.max_image_levels = 4;
@@ -102,7 +239,8 @@ impl PreparedTemplate {
         screen_height: u32,
         confidence: f32,
         stop: Option<&AtomicBool>,
-    ) -> Result<Option<(u32, u32, u32, u32)>, String> {
+        thread_count: usize,
+    ) -> Result<Option<(u32, u32, u32, u32)>, CoreError> {
         if !self.is_valid()
             || self.width > screen_width
             || self.height > screen_height
@@ -114,15 +252,15 @@ impl PreparedTemplate {
             return Ok(None);
         };
         let width = usize::try_from(screen_width)
-            .map_err(|_| "Screenshot width exceeds platform limits.")?;
+            .map_err(|_| CoreError::DimensionsTooLarge("Screenshot width"))?;
         let height = usize::try_from(screen_height)
-            .map_err(|_| "Screenshot height exceeds platform limits.")?;
+            .map_err(|_| CoreError::DimensionsTooLarge("Screenshot height"))?;
         let image = corrmatch::ImageView::from_slice(screen_gray, width, height)
-            .map_err(|error| format!("Could not prepare screenshot for matching: {error}"))?;
-        let pool = match_pool()?;
+            .map_err(|error| CoreError::MatcherInput(error.to_string()))?;
+        let pool = match_pool(thread_count)?;
         let result = pool
             .install(|| matcher.match_image(image))
-            .map_err(|error| format!("Image matching failed: {error}"))?;
+            .map_err(|error| CoreError::MatcherExecution(error.to_string()))?;
         if stop.is_some_and(|flag| flag.load(Ordering::Acquire)) || result.score <= confidence {
             return Ok(None);
         }
@@ -135,14 +273,22 @@ impl PreparedTemplate {
 }
 
 pub(crate) fn default_click_delay_ms() -> u64 {
-    25
+    DEFAULT_CLICK_DELAY_MS
 }
 
 pub(crate) fn normalize_click_delay_ms(delay: u64) -> u64 {
-    if CLICK_DELAYS_MS.contains(&delay) {
+    if (MIN_CLICK_DELAY_MS..=MAX_CLICK_DELAY_MS).contains(&delay) {
         delay
     } else {
         default_click_delay_ms()
+    }
+}
+
+pub(crate) fn normalize_match_threads(threads: usize) -> usize {
+    if MATCH_THREAD_OPTIONS.contains(&threads) {
+        threads
+    } else {
+        DEFAULT_MATCH_THREADS
     }
 }
 
@@ -151,18 +297,27 @@ pub(crate) struct WorkerState {
     pub(crate) running: AtomicBool,
     pub(crate) clicks: AtomicU64,
     pub(crate) click_delay_ms: AtomicU64,
+    pub(crate) match_threads: AtomicUsize,
     pub(crate) scan_duration_us: AtomicU64,
-    pub(crate) message: Mutex<String>,
+    pub(crate) error: Mutex<Option<CoreError>>,
 }
 
-static MATCH_POOL: OnceLock<Result<ThreadPool, String>> = OnceLock::new();
-fn match_pool() -> Result<&'static ThreadPool, String> {
-    match MATCH_POOL.get_or_init(|| {
+static MATCH_POOLS: [OnceLock<Result<ThreadPool, CoreError>>; MATCH_THREAD_OPTIONS.len()] =
+    [const { OnceLock::new() }; MATCH_THREAD_OPTIONS.len()];
+
+fn match_pool(thread_count: usize) -> Result<&'static ThreadPool, CoreError> {
+    let Some(pool_index) = MATCH_THREAD_OPTIONS
+        .iter()
+        .position(|&option| option == thread_count)
+    else {
+        return Err(CoreError::UnsupportedThreadCount(thread_count));
+    };
+    match MATCH_POOLS[pool_index].get_or_init(|| {
         ThreadPoolBuilder::new()
-            .num_threads(MATCH_THREADS)
+            .num_threads(thread_count)
             .thread_name(|index| format!("rusty-matcher-{index}"))
             .build()
-            .map_err(|error| format!("Could not initialize image-matching workers: {error}"))
+            .map_err(|error| CoreError::MatcherPool(error.to_string()))
     }) {
         Ok(pool) => Ok(pool),
         Err(error) => Err(error.clone()),
@@ -172,7 +327,7 @@ fn match_pool() -> Result<&'static ThreadPool, String> {
 /// Captures, matches, and clicks in a loop using a persistent CPU thread pool.
 pub(crate) fn run_clicker(templates: Vec<PreparedTemplate>, worker: Arc<WorkerState>) {
     let mut click_count = 0u64;
-    let mut error_message = None;
+    let mut error = None;
     let mut next_template_index = 0;
     let mut capture = None;
     let mut screen_gray = Vec::new();
@@ -181,8 +336,8 @@ pub(crate) fn run_clicker(templates: Vec<PreparedTemplate>, worker: Arc<WorkerSt
         let (screen_width, screen_height, origin_x, origin_y) =
             match capture_screen(&mut capture, &mut screen_gray) {
                 Ok(screen) => screen,
-                Err(error) => {
-                    error_message = Some(format!("Screen capture failed: {error}"));
+                Err(capture_error) => {
+                    error = Some(CoreError::ScreenCapture(Box::new(capture_error)));
                     break;
                 }
             };
@@ -194,10 +349,11 @@ pub(crate) fn run_clicker(templates: Vec<PreparedTemplate>, worker: Arc<WorkerSt
             screen_height,
             MATCH_CONFIDENCE,
             Some(&worker.stop),
+            worker.match_threads.load(Ordering::Acquire),
         ) {
             Ok(found) => found,
-            Err(error) => {
-                error_message = Some(error);
+            Err(match_error) => {
+                error = Some(match_error);
                 break;
             }
         };
@@ -214,22 +370,27 @@ pub(crate) fn run_clicker(templates: Vec<PreparedTemplate>, worker: Arc<WorkerSt
             let center_y = origin_y + y as i32 + (height / 2) as i32;
             unsafe {
                 let mut cursor = POINT::default();
-                if GetCursorPos(&mut cursor).is_ok()
-                    && ((cursor.x == origin_x || cursor.x == origin_x + screen_width as i32 - 1)
-                        && (cursor.y == origin_y
-                            || cursor.y == origin_y + screen_height as i32 - 1))
-                {
-                    error_message = Some(
-                        "Stopped by the fail-safe (mouse moved to a screen corner).".to_owned(),
-                    );
-                    break;
+                match GetCursorPos(&mut cursor) {
+                    Ok(()) => {
+                        if (cursor.x == origin_x || cursor.x == origin_x + screen_width as i32 - 1)
+                            && (cursor.y == origin_y
+                                || cursor.y == origin_y + screen_height as i32 - 1)
+                        {
+                            error = Some(CoreError::FailSafeTriggered);
+                            break;
+                        }
+                    }
+                    Err(_) => {
+                        error = Some(CoreError::CursorPosition);
+                        break;
+                    }
                 }
                 if SetCursorPos(center_x, center_y).is_err() {
-                    error_message = Some("Could not move the mouse cursor.".to_owned());
+                    error = Some(CoreError::CursorMove);
                     break;
                 }
-                if let Err(error) = send_left_click() {
-                    error_message = Some(error);
+                if let Err(input_error) = send_left_click() {
+                    error = Some(input_error);
                     break;
                 }
             }
@@ -239,7 +400,7 @@ pub(crate) fn run_clicker(templates: Vec<PreparedTemplate>, worker: Arc<WorkerSt
             clicked = true;
         }
 
-        if error_message.is_some() {
+        if error.is_some() {
             break;
         }
         let delay = if clicked {
@@ -254,11 +415,11 @@ pub(crate) fn run_clicker(templates: Vec<PreparedTemplate>, worker: Arc<WorkerSt
         sleep_interruptible(delay, &worker.stop);
     }
 
-    if let Some(message) = error_message {
+    if let Some(error) = error {
         *worker
-            .message
+            .error
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = message;
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error);
     }
     worker.running.store(false, Ordering::Release);
 }
@@ -276,7 +437,7 @@ fn sleep_interruptible(duration: Duration, stop: &AtomicBool) {
 }
 
 /// Converts RGB bytes to grayscale using OpenCV-compatible fixed-point coefficients.
-fn rgb_to_gray(rgb: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
+fn rgb_to_gray(rgb: &[u8], width: u32, height: u32) -> Result<Vec<u8>, CoreError> {
     let expected_bytes = usize::try_from(width)
         .ok()
         .and_then(|width| {
@@ -285,9 +446,13 @@ fn rgb_to_gray(rgb: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
                 .and_then(|height| width.checked_mul(height))
         })
         .and_then(|pixels| pixels.checked_mul(3))
-        .ok_or_else(|| "Image dimensions are too large.".to_owned())?;
+        .ok_or(CoreError::DimensionsTooLarge("Image"))?;
     if rgb.len() != expected_bytes {
-        return Err("RGB image data does not match its dimensions.".to_owned());
+        return Err(CoreError::InvalidPixelBuffer {
+            format: "RGB",
+            expected: expected_bytes,
+            actual: rgb.len(),
+        });
     }
     let mut gray = Vec::with_capacity(expected_bytes / 3);
     for pixel in rgb.chunks_exact(3) {
@@ -302,7 +467,7 @@ fn rgb_pixel_to_gray(red: u8, green: u8, blue: u8) -> u8 {
     (gray >> 14) as u8
 }
 
-fn bgra_to_gray(bgra: &[u8], width: u32, height: u32, gray: &mut Vec<u8>) -> Result<(), String> {
+fn bgra_to_gray(bgra: &[u8], width: u32, height: u32, gray: &mut Vec<u8>) -> Result<(), CoreError> {
     let expected_bytes = usize::try_from(width)
         .ok()
         .and_then(|width| {
@@ -311,9 +476,13 @@ fn bgra_to_gray(bgra: &[u8], width: u32, height: u32, gray: &mut Vec<u8>) -> Res
                 .and_then(|height| width.checked_mul(height))
         })
         .and_then(|pixels| pixels.checked_mul(4))
-        .ok_or_else(|| "Screenshot dimensions are too large.".to_owned())?;
+        .ok_or(CoreError::DimensionsTooLarge("Screenshot"))?;
     if bgra.len() != expected_bytes {
-        return Err("Captured pixel data does not match the screen dimensions.".to_owned());
+        return Err(CoreError::InvalidPixelBuffer {
+            format: "Captured BGRA",
+            expected: expected_bytes,
+            actual: bgra.len(),
+        });
     }
     let pixel_count = expected_bytes / 4;
     gray.resize(pixel_count, 0);
@@ -330,7 +499,7 @@ fn find_template(
     template: &PreparedTemplate,
     confidence: f32,
     stop: Option<&AtomicBool>,
-) -> Result<Option<(u32, u32, u32, u32)>, String> {
+) -> Result<Option<(u32, u32, u32, u32)>, CoreError> {
     if !template.is_valid() {
         return Ok(None);
     }
@@ -343,10 +512,17 @@ fn find_template(
     }
 
     let screen_gray = rgb_to_gray(screenshot.as_raw(), screen_width, screen_height)?;
-    template.find_match(&screen_gray, screen_width, screen_height, confidence, stop)
+    template.find_match(
+        &screen_gray,
+        screen_width,
+        screen_height,
+        confidence,
+        stop,
+        DEFAULT_MATCH_THREADS,
+    )
 }
 
-fn send_left_click() -> Result<(), String> {
+fn send_left_click() -> Result<(), CoreError> {
     let input_size = std::mem::size_of::<INPUT>() as i32;
     let inputs = [
         INPUT {
@@ -384,15 +560,18 @@ fn send_left_click() -> Result<(), String> {
             },
         };
         if unsafe { SendInput(&[release], input_size) } != 1 {
-            return Err(
-                "Windows accepted only part of the mouse click and could not release the button."
-                    .to_owned(),
-            );
+            return Err(CoreError::InputDelivery {
+                inserted,
+                expected: inputs.len() as u32,
+                release_failed: true,
+            });
         }
     }
-    Err(format!(
-        "Windows accepted only {inserted} of 2 mouse click events."
-    ))
+    Err(CoreError::InputDelivery {
+        inserted,
+        expected: inputs.len() as u32,
+        release_failed: false,
+    })
 }
 
 struct ScreenCapture {
@@ -406,7 +585,7 @@ struct ScreenCapture {
 }
 
 impl ScreenCapture {
-    fn new(width: i32, height: i32) -> Result<Self, String> {
+    fn new(width: i32, height: i32) -> Result<Self, CoreError> {
         usize::try_from(width)
             .ok()
             .and_then(|width| {
@@ -416,16 +595,16 @@ impl ScreenCapture {
             })
             .and_then(|pixels| pixels.checked_mul(4))
             .filter(|&bytes| bytes <= isize::MAX as usize)
-            .ok_or_else(|| "Screen dimensions are too large to capture safely.".to_owned())?;
+            .ok_or(CoreError::CaptureDimensionsTooLarge)?;
         unsafe {
             let screen_dc = GetDC(None);
             if screen_dc.0.is_null() {
-                return Err("Could not get the screen device context.".to_owned());
+                return Err(CoreError::CaptureScreenDeviceContext);
             }
             let memory_dc = CreateCompatibleDC(Some(screen_dc));
             if memory_dc.0.is_null() {
                 ReleaseDC(None, screen_dc);
-                return Err("Could not create a compatible device context.".to_owned());
+                return Err(CoreError::CaptureMemoryDeviceContext);
             }
             let bitmap_info = BITMAPINFO {
                 bmiHeader: BITMAPINFOHEADER {
@@ -452,9 +631,7 @@ impl ScreenCapture {
                 Err(error) => {
                     let _ = DeleteDC(memory_dc);
                     ReleaseDC(None, screen_dc);
-                    return Err(format!(
-                        "Could not create a direct-access screenshot bitmap: {error}"
-                    ));
+                    return Err(CoreError::CaptureBitmap(error.to_string()));
                 }
             };
             if bitmap.0.is_null() || pixels.is_null() {
@@ -463,14 +640,16 @@ impl ScreenCapture {
                 }
                 let _ = DeleteDC(memory_dc);
                 ReleaseDC(None, screen_dc);
-                return Err("Could not create a direct-access screenshot bitmap.".to_owned());
+                return Err(CoreError::CaptureBitmap(
+                    "Windows returned an invalid bitmap or pixel buffer.".to_owned(),
+                ));
             }
             let previous_bitmap = SelectObject(memory_dc, HGDIOBJ(bitmap.0));
             if previous_bitmap.0.is_null() || previous_bitmap.0 as isize == -1 {
                 let _ = DeleteObject(HGDIOBJ(bitmap.0));
                 let _ = DeleteDC(memory_dc);
                 ReleaseDC(None, screen_dc);
-                return Err("Could not select the screenshot bitmap.".to_owned());
+                return Err(CoreError::CaptureBitmapSelection);
             }
             Ok(Self {
                 screen_dc,
@@ -500,13 +679,13 @@ impl Drop for ScreenCapture {
 fn capture_screen(
     capture: &mut Option<ScreenCapture>,
     gray: &mut Vec<u8>,
-) -> Result<(u32, u32, i32, i32), String> {
+) -> Result<(u32, u32, i32, i32), CoreError> {
     let origin_x = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
     let origin_y = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
     let width = unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) };
     let height = unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) };
     if width <= 0 || height <= 0 {
-        return Err("Windows reported an invalid screen size.".to_owned());
+        return Err(CoreError::CaptureScreenSize);
     }
     if capture
         .as_ref()
@@ -514,9 +693,7 @@ fn capture_screen(
     {
         *capture = Some(ScreenCapture::new(width, height)?);
     }
-    let capture = capture
-        .as_mut()
-        .ok_or_else(|| "Could not initialize screen capture.".to_owned())?;
+    let capture = capture.as_mut().ok_or(CoreError::CaptureNotInitialized)?;
     unsafe {
         BitBlt(
             capture.memory_dc,
@@ -529,11 +706,11 @@ fn capture_screen(
             origin_y,
             SRCCOPY | CAPTUREBLT,
         )
-        .map_err(|error| format!("Could not copy screen pixels: {error}"))?;
+        .map_err(|error| CoreError::CapturePixels(error.to_string()))?;
         let pixel_bytes = (width as usize)
             .checked_mul(height as usize)
             .and_then(|pixels| pixels.checked_mul(4))
-            .ok_or_else(|| "Screenshot dimensions are too large.".to_owned())?;
+            .ok_or(CoreError::DimensionsTooLarge("Screenshot"))?;
         let bgra = std::slice::from_raw_parts(capture.pixels, pixel_bytes);
         bgra_to_gray(bgra, width as u32, height as u32, gray)?;
     }
@@ -543,8 +720,10 @@ fn capture_screen(
 #[cfg(test)]
 mod tests {
     use super::{
-        PreparedTemplate, bgra_to_gray, default_click_delay_ms, find_template,
-        normalize_click_delay_ms, rgb_to_gray,
+        CoreError, DEFAULT_CLICK_DELAY_MS, DEFAULT_MATCH_THREADS, MATCH_THREAD_OPTIONS,
+        MAX_CLICK_DELAY_MS, MIN_CLICK_DELAY_MS, PreparedTemplate, bgra_to_gray,
+        default_click_delay_ms, find_template, normalize_click_delay_ms, normalize_match_threads,
+        rgb_to_gray,
     };
     use crate::main_gui::{Preferences, Theme, scale};
     use image::{Rgb, RgbImage, Rgba, RgbaImage};
@@ -629,6 +808,19 @@ mod tests {
             rgb_to_gray(&[255, 0, 0, 0, 255, 0, 0, 0, 255], 3, 1)
                 .expect("RGB buffer dimensions are valid"),
             vec![76, 150, 29]
+        );
+    }
+
+    #[test]
+    fn reports_invalid_rgb_buffer_as_a_typed_error() {
+        let error = rgb_to_gray(&[1, 2], 1, 1).expect_err("RGB buffer has the wrong length");
+        assert_eq!(
+            error,
+            CoreError::InvalidPixelBuffer {
+                format: "RGB",
+                expected: 3,
+                actual: 2,
+            }
         );
     }
 
@@ -801,9 +993,13 @@ mod tests {
             serde_json::from_str(r#"{"image_paths":[],"always_on_top":true}"#)
                 .expect("existing preferences remain readable");
         assert_eq!(preferences.click_delay_ms, default_click_delay_ms());
+        assert_eq!(preferences.match_threads, DEFAULT_MATCH_THREADS);
         assert_eq!(preferences.theme, Theme::Dark);
         assert_eq!(preferences.image_count, 10);
         assert!(preferences.always_on_top);
+        let defaults = Preferences::default();
+        assert_eq!(defaults.click_delay_ms, DEFAULT_CLICK_DELAY_MS);
+        assert_eq!(defaults.match_threads, DEFAULT_MATCH_THREADS);
     }
 
     #[test]
@@ -812,12 +1008,14 @@ mod tests {
             image_paths: vec![Some("target.png".to_owned())],
             always_on_top: true,
             click_delay_ms: 500,
+            match_threads: 8,
             theme: Theme::Purple,
             image_count: 37,
         };
         let encoded = serde_json::to_string(&preferences).expect("preferences serialize");
         let decoded: Preferences = serde_json::from_str(&encoded).expect("preferences deserialize");
         assert_eq!(decoded.click_delay_ms, 500);
+        assert_eq!(decoded.match_threads, 8);
         assert_eq!(decoded.theme, Theme::Purple);
         assert_eq!(decoded.image_count, 37);
         assert_eq!(decoded.image_paths, preferences.image_paths);
@@ -825,8 +1023,28 @@ mod tests {
 
     #[test]
     fn invalid_saved_delay_uses_the_default() {
-        assert_eq!(normalize_click_delay_ms(0), 25);
-        assert_eq!(normalize_click_delay_ms(250), 250);
+        assert_eq!(default_click_delay_ms(), 100);
+        assert_eq!(normalize_click_delay_ms(0), DEFAULT_CLICK_DELAY_MS);
+        assert_eq!(
+            normalize_click_delay_ms(MIN_CLICK_DELAY_MS),
+            MIN_CLICK_DELAY_MS
+        );
+        assert_eq!(
+            normalize_click_delay_ms(MAX_CLICK_DELAY_MS),
+            MAX_CLICK_DELAY_MS
+        );
+        assert_eq!(
+            normalize_click_delay_ms(MAX_CLICK_DELAY_MS + 1),
+            DEFAULT_CLICK_DELAY_MS
+        );
+    }
+
+    #[test]
+    fn match_thread_options_and_saved_values_are_validated() {
+        assert_eq!(MATCH_THREAD_OPTIONS, [1, 2, 4, 8]);
+        assert_eq!(normalize_match_threads(DEFAULT_MATCH_THREADS), 2);
+        assert_eq!(normalize_match_threads(8), 8);
+        assert_eq!(normalize_match_threads(3), DEFAULT_MATCH_THREADS);
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use crate::algorithms::{
-    CLICK_DELAYS_MS, PreparedTemplate, WorkerState, default_click_delay_ms,
-    normalize_click_delay_ms, run_clicker,
+    DEFAULT_MATCH_THREADS, MATCH_THREAD_OPTIONS, MAX_CLICK_DELAY_MS, MIN_CLICK_DELAY_MS,
+    PreparedTemplate, WorkerState, default_click_delay_ms, normalize_click_delay_ms,
+    normalize_match_threads, run_clicker,
 };
 #[path = "settings_gui.rs"]
 mod settings_gui;
@@ -8,7 +9,7 @@ use image::ImageReader;
 use image::imageops::FilterType;
 use settings_gui::{
     DEFAULT_IMAGE_COUNT, ID_SETTINGS_DELAY_LABEL, ID_SETTINGS_SLOT_COUNT_LABEL,
-    ID_SETTINGS_THEME_LABEL, THEMES,
+    ID_SETTINGS_THEME_LABEL, ID_SETTINGS_THREADS_LABEL, THEMES,
 };
 pub(crate) use settings_gui::{Preferences, Theme};
 use std::{
@@ -18,7 +19,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     thread,
 };
@@ -54,18 +55,19 @@ use windows::{
                 BM_GETCHECK, BM_SETCHECK, BS_AUTOCHECKBOX, CB_ADDSTRING, CB_GETCURSEL,
                 CB_RESETCONTENT, CB_SETCURSEL, CBN_SELCHANGE, CBS_DROPDOWNLIST, CS_HREDRAW,
                 CS_VREDRAW, CW_USEDEFAULT, CallWindowProcW, CreateWindowExW, DefWindowProcW,
-                DestroyWindow, DispatchMessageW, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect,
-                GetDlgCtrlID, GetMessageW, GetParent, GetWindowLongPtrW, GetWindowTextW, HMENU,
-                HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST, IDC_ARROW, LoadCursorW, LoadIconW,
-                MB_ICONERROR, MB_ICONWARNING, MB_OK, MINMAXINFO, MSG, MessageBoxW, MoveWindow,
-                PostMessageW, PostQuitMessage, RegisterClassW, STM_SETIMAGE, SW_HIDE, SW_SHOW,
-                SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SendMessageW, SetTimer,
-                SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage,
-                WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN,
-                WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED,
-                WM_DRAWITEM, WM_ERASEBKGND, WM_GETMINMAXINFO, WM_HOTKEY, WM_KEYDOWN,
-                WM_LBUTTONDOWN, WM_NCCREATE, WM_NCHITTEST, WM_SETFONT, WM_SIZE, WM_TIMER,
-                WNDCLASSW, WNDPROC, WS_CHILD, WS_CLIPCHILDREN, WS_POPUP, WS_THICKFRAME, WS_VISIBLE,
+                DestroyWindow, DispatchMessageW, EN_KILLFOCUS, ES_AUTOHSCROLL, ES_NUMBER,
+                GWLP_USERDATA, GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetMessageW, GetParent,
+                GetWindowLongPtrW, GetWindowTextW, HMENU, HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST,
+                IDC_ARROW, LoadCursorW, LoadIconW, MB_ICONERROR, MB_ICONWARNING, MB_OK, MINMAXINFO,
+                MSG, MessageBoxW, MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW,
+                STM_SETIMAGE, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+                SWP_NOZORDER, SendMessageW, SetTimer, SetWindowLongPtrW, SetWindowPos,
+                SetWindowTextW, ShowWindow, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE,
+                WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLOREDIT,
+                WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_DRAWITEM,
+                WM_ERASEBKGND, WM_GETMINMAXINFO, WM_HOTKEY, WM_KEYDOWN, WM_LBUTTONDOWN,
+                WM_NCCREATE, WM_NCHITTEST, WM_SETFONT, WM_SIZE, WM_TIMER, WNDCLASSW, WNDPROC,
+                WS_BORDER, WS_CHILD, WS_CLIPCHILDREN, WS_POPUP, WS_THICKFRAME, WS_VISIBLE,
             },
         },
     },
@@ -81,14 +83,14 @@ const ID_STOP: usize = 11;
 const ID_CLOSE: usize = 12;
 const ID_ALWAYS_ON_TOP: usize = 13;
 const ID_SETTINGS: usize = 14;
-const ID_SETTINGS_BACK: usize = 15;
-const ID_DELAY_COMBO: usize = 16;
+const ID_DELAY_INPUT: usize = 16;
 const ID_THEME_COMBO: usize = 17;
 const ID_SLOT_COMBO: usize = 18;
 const ID_SELECT_IMAGE: usize = 19;
 const ID_CLEAR_IMAGE: usize = 20;
 const ID_BRAND_ICON: usize = 22;
 const ID_SLOT_COUNT_COMBO: usize = 23;
+const ID_THREAD_COUNT_COMBO: usize = 24;
 const ID_SLOT_LABEL: usize = 302;
 const ID_PREVIEW_LABEL: usize = 303;
 const ID_STATUS_LABEL: usize = 304;
@@ -183,15 +185,17 @@ struct AppState {
     main_brand_icon: HWND,
     main_heading: HWND,
     version_label: HWND,
-    delay_combo: HWND,
+    click_delay_input: HWND,
     theme_combo: HWND,
     slot_count_combo: HWND,
+    thread_count_combo: HWND,
     settings_open: bool,
     selected_slot: usize,
     preview_bitmap: OwnedGdiObject<HBITMAP>,
     preview_source: Option<image::DynamicImage>,
     always_on_top: bool,
     click_delay_ms: u64,
+    match_threads: usize,
     theme: Theme,
     background_brush: OwnedGdiObject<HBRUSH>,
     surface_brush: OwnedGdiObject<HBRUSH>,
@@ -236,15 +240,17 @@ impl AppState {
             main_brand_icon: HWND::default(),
             main_heading: HWND::default(),
             version_label: HWND::default(),
-            delay_combo: HWND::default(),
+            click_delay_input: HWND::default(),
             theme_combo: HWND::default(),
             slot_count_combo: HWND::default(),
+            thread_count_combo: HWND::default(),
             settings_open: false,
             selected_slot: 0,
             preview_bitmap: OwnedGdiObject::default(),
             preview_source: None,
             always_on_top: false,
             click_delay_ms: default_click_delay_ms(),
+            match_threads: DEFAULT_MATCH_THREADS,
             theme: Theme::default(),
             background_brush: OwnedGdiObject::default(),
             surface_brush: OwnedGdiObject::default(),
@@ -309,6 +315,7 @@ impl AppState {
         };
         self.always_on_top = preferences.always_on_top;
         self.click_delay_ms = normalize_click_delay_ms(preferences.click_delay_ms);
+        self.match_threads = normalize_match_threads(preferences.match_threads);
         self.theme = preferences.theme;
         self.image_count = preferences.image_count.clamp(1, MAX_IMAGE_COUNT);
 
@@ -351,6 +358,7 @@ impl AppState {
                 .collect(),
             always_on_top: self.always_on_top,
             click_delay_ms: self.click_delay_ms,
+            match_threads: self.match_threads,
             theme: self.theme,
             image_count: self.image_count,
         };
@@ -741,8 +749,9 @@ impl AppState {
             running: AtomicBool::new(true),
             clicks: AtomicU64::new(0),
             click_delay_ms: AtomicU64::new(self.click_delay_ms),
+            match_threads: AtomicUsize::new(self.match_threads),
             scan_duration_us: AtomicU64::new(0),
-            message: Mutex::new(String::new()),
+            error: Mutex::new(None),
         });
         self.worker = Some(Arc::clone(&worker));
         set_text(self.status_label, "Running | Scan: waiting");
@@ -1127,24 +1136,46 @@ unsafe fn create_controls(window: HWND, state: &mut AppState) {
         state.settings_title = create_control(
             window,
             w!("STATIC"),
-            "Click delay",
+            "Click interval (ms)",
             WINDOW_STYLE(0),
             24,
-            100,
-            170,
-            28,
+            55,
+            260,
+            24,
             ID_SETTINGS_DELAY_LABEL,
         );
-        state.delay_combo = create_control(
+        state.click_delay_input = create_control(
+            window,
+            w!("EDIT"),
+            &state.click_delay_ms.to_string(),
+            WINDOW_STYLE(ES_NUMBER as u32 | ES_AUTOHSCROLL as u32 | WS_BORDER.0),
+            24,
+            80,
+            200,
+            26,
+            ID_DELAY_INPUT,
+        );
+        let thread_count_label = create_control(
+            window,
+            w!("STATIC"),
+            "Scanning threads",
+            WINDOW_STYLE(0),
+            24,
+            116,
+            260,
+            24,
+            ID_SETTINGS_THREADS_LABEL,
+        );
+        state.thread_count_combo = create_control(
             window,
             w!("COMBOBOX"),
             "",
             WINDOW_STYLE(CBS_DROPDOWNLIST as u32),
-            210,
-            94,
-            170,
-            220,
-            ID_DELAY_COMBO,
+            24,
+            140,
+            200,
+            110,
+            ID_THREAD_COUNT_COMBO,
         );
         let theme_label = create_control(
             window,
@@ -1152,9 +1183,9 @@ unsafe fn create_controls(window: HWND, state: &mut AppState) {
             "Window color",
             WINDOW_STYLE(0),
             24,
-            152,
-            170,
-            28,
+            178,
+            260,
+            24,
             ID_SETTINGS_THEME_LABEL,
         );
         state.theme_combo = create_control(
@@ -1162,10 +1193,10 @@ unsafe fn create_controls(window: HWND, state: &mut AppState) {
             w!("COMBOBOX"),
             "",
             WINDOW_STYLE(CBS_DROPDOWNLIST as u32),
-            210,
-            146,
-            170,
-            180,
+            24,
+            202,
+            200,
+            110,
             ID_THEME_COMBO,
         );
         let slot_count_label = create_control(
@@ -1174,9 +1205,9 @@ unsafe fn create_controls(window: HWND, state: &mut AppState) {
             "Number of slots",
             WINDOW_STYLE(0),
             24,
-            202,
-            170,
-            28,
+            240,
+            260,
+            24,
             ID_SETTINGS_SLOT_COUNT_LABEL,
         );
         state.slot_count_combo = create_control(
@@ -1184,10 +1215,10 @@ unsafe fn create_controls(window: HWND, state: &mut AppState) {
             w!("COMBOBOX"),
             "",
             WINDOW_STYLE(CBS_DROPDOWNLIST as u32),
-            210,
-            196,
-            170,
-            220,
+            24,
+            264,
+            200,
+            120,
             ID_SLOT_COUNT_COMBO,
         );
         let settings_note = create_control(
@@ -1196,31 +1227,21 @@ unsafe fn create_controls(window: HWND, state: &mut AppState) {
             "Changes are saved automatically.",
             WINDOW_STYLE(0),
             24,
-            248,
+            298,
             440,
-            26,
-            0,
-        );
-        let settings_back = create_control(
-            window,
-            w!("BUTTON"),
-            "Back to images",
-            WINDOW_STYLE(BUTTON_STYLE),
             24,
-            292,
-            160,
-            32,
-            ID_SETTINGS_BACK,
+            0,
         );
         state.settings_controls = vec![
             state.settings_title,
-            state.delay_combo,
+            state.click_delay_input,
+            thread_count_label,
+            state.thread_count_combo,
             theme_label,
             state.theme_combo,
             slot_count_label,
             state.slot_count_combo,
             settings_note,
-            settings_back,
         ];
         let mut drag_setup_failed = false;
         for control in [
@@ -1233,6 +1254,7 @@ unsafe fn create_controls(window: HWND, state: &mut AppState) {
             state.image_name,
             state.status_label,
             state.settings_title,
+            thread_count_label,
             theme_label,
             slot_count_label,
             settings_note,
@@ -1242,18 +1264,18 @@ unsafe fn create_controls(window: HWND, state: &mut AppState) {
         if drag_setup_failed {
             state.show_message("Some labels could not be made draggable.", MB_ICONWARNING);
         }
-        for (index, delay) in CLICK_DELAYS_MS.iter().enumerate() {
-            let label = format!("{delay} ms");
+        for (index, threads) in MATCH_THREAD_OPTIONS.iter().enumerate() {
+            let label = threads.to_string();
             let wide: Vec<u16> = label.encode_utf16().chain(Some(0)).collect();
             SendMessageW(
-                state.delay_combo,
+                state.thread_count_combo,
                 CB_ADDSTRING,
                 Some(WPARAM(0)),
                 Some(LPARAM(wide.as_ptr() as isize)),
             );
-            if *delay == state.click_delay_ms {
+            if *threads == state.match_threads {
                 SendMessageW(
-                    state.delay_combo,
+                    state.thread_count_combo,
                     CB_SETCURSEL,
                     Some(WPARAM(index)),
                     Some(LPARAM(0)),
@@ -1395,14 +1417,12 @@ fn update_ui_font(state: &mut AppState, dpi: u32) {
                 Some(LPARAM(1)),
             );
         }
-        for control in [state.main_heading, state.settings_title] {
-            SendMessageW(
-                control,
-                WM_SETFONT,
-                Some(WPARAM(heading_font.get().0 as usize)),
-                Some(LPARAM(1)),
-            );
-        }
+        SendMessageW(
+            state.main_heading,
+            WM_SETFONT,
+            Some(WPARAM(heading_font.get().0 as usize)),
+            Some(LPARAM(1)),
+        );
     }
     state.font = font;
     state.heading_font = heading_font;
@@ -1719,53 +1739,49 @@ fn layout_controls(window: HWND, state: &AppState) {
         move_control(
             state.settings_title,
             margin,
-            scale(70, s),
-            scale(184, s),
-            scale(30, s),
-        );
-        move_control(
-            state.delay_combo,
-            margin,
-            scale(104, s),
-            scale(200, s),
-            scale(230, s),
-        );
-        let theme_label = state.settings_controls.get(2).copied().unwrap_or_default();
-        move_control(
-            theme_label,
-            margin,
-            scale(152, s),
-            scale(184, s),
+            scale(55, s),
+            scale(260, s),
             scale(24, s),
         );
         move_control(
-            state.theme_combo,
+            state.click_delay_input,
             margin,
-            scale(178, s),
+            scale(80, s),
             scale(200, s),
-            scale(180, s),
+            scale(26, s),
+        );
+        if let Some(label) = state.settings_controls.get(2) {
+            move_control(*label, margin, scale(116, s), scale(260, s), scale(24, s));
+        }
+        move_control(
+            state.thread_count_combo,
+            margin,
+            scale(140, s),
+            scale(200, s),
+            scale(110, s),
         );
         if let Some(label) = state.settings_controls.get(4) {
-            move_control(*label, margin, scale(218, s), scale(184, s), scale(24, s));
+            move_control(*label, margin, scale(178, s), scale(260, s), scale(24, s));
+        }
+        move_control(
+            state.theme_combo,
+            margin,
+            scale(202, s),
+            scale(200, s),
+            scale(110, s),
+        );
+        if let Some(label) = state.settings_controls.get(6) {
+            move_control(*label, margin, scale(240, s), scale(260, s), scale(24, s));
         }
         move_control(
             state.slot_count_combo,
             margin,
-            scale(244, s),
+            scale(264, s),
             scale(200, s),
-            scale(220, s),
+            scale(120, s),
         );
-        if let Some(note) = state.settings_controls.get(6) {
-            move_control(*note, margin, scale(286, s), content_width, scale(24, s));
-        }
-        if let Some(back) = state.settings_controls.get(7) {
-            move_control(
-                *back,
-                margin,
-                height - scale(48, s),
-                scale(148, s),
-                scale(36, s),
-            );
+        if let Some(note) = state.settings_controls.get(8) {
+            move_control(*note, margin, scale(298, s), content_width, scale(24, s));
         }
     }
 }
@@ -1839,6 +1855,7 @@ unsafe extern "system" fn window_proc(
                 ID_PREVIEW_LABEL,
                 ID_STATUS_LABEL,
                 ID_SETTINGS_DELAY_LABEL,
+                ID_SETTINGS_THREADS_LABEL,
                 ID_SETTINGS_THEME_LABEL,
                 ID_SETTINGS_SLOT_COUNT_LABEL,
             ]
@@ -1954,8 +1971,6 @@ unsafe extern "system" fn window_proc(
                     let _ = PostMessageW(Some(window), WM_CLOSE, WPARAM(0), LPARAM(0));
                 } else if id == ID_SETTINGS {
                     state.set_settings_open(window, !state.settings_open);
-                } else if id == ID_SETTINGS_BACK {
-                    state.set_settings_open(window, false);
                 } else if id == ID_ALWAYS_ON_TOP {
                     let checked = SendMessageW(
                         state.always_on_top_checkbox,
@@ -1965,16 +1980,25 @@ unsafe extern "system" fn window_proc(
                     )
                     .0 == BST_CHECKED.0 as isize;
                     state.set_always_on_top(window, checked);
-                } else if id == ID_DELAY_COMBO && notification == CBN_SELCHANGE as usize {
+                } else if id == ID_DELAY_INPUT && notification == EN_KILLFOCUS as usize {
+                    let mut value = [0u16; 32];
+                    let length = GetWindowTextW(state.click_delay_input, &mut value);
+                    let delay = usize::try_from(length)
+                        .ok()
+                        .and_then(|length| String::from_utf16(&value[..length]).ok())
+                        .and_then(|value| value.parse::<u64>().ok())
+                        .unwrap_or_default();
+                    state.set_click_delay(delay);
+                } else if id == ID_THREAD_COUNT_COMBO && notification == CBN_SELCHANGE as usize {
                     let selection = SendMessageW(
-                        state.delay_combo,
+                        state.thread_count_combo,
                         CB_GETCURSEL,
                         Some(WPARAM(0)),
                         Some(LPARAM(0)),
                     )
                     .0;
                     if let Ok(selection) = usize::try_from(selection) {
-                        state.set_click_delay(selection);
+                        state.set_match_threads(selection);
                     }
                 } else if id == ID_THEME_COMBO && notification == CBN_SELCHANGE as usize {
                     let selection = SendMessageW(
@@ -2033,15 +2057,16 @@ unsafe extern "system" fn window_proc(
                         let clicks = worker.clicks.load(Ordering::Relaxed);
                         let scan_ms =
                             worker.scan_duration_us.load(Ordering::Relaxed) as f64 / 1_000.0;
-                        let message = worker
-                            .message
+                        let error = worker
+                            .error
                             .lock()
                             .unwrap_or_else(std::sync::PoisonError::into_inner)
-                            .clone();
-                        let status = if message.is_empty() {
-                            format!("Stopped | {clicks} clicks | Scan: {scan_ms:.2} ms")
-                        } else {
+                            .as_ref()
+                            .map(ToString::to_string);
+                        let status = if let Some(message) = error {
                             message
+                        } else {
+                            format!("Stopped | {clicks} clicks | Scan: {scan_ms:.2} ms")
                         };
                         state.set_running_ui(window, false);
                         set_text(state.status_label, &status);

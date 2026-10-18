@@ -2,7 +2,7 @@
 
 # RustyClicker  <img alt="GitHub code size in bytes" src="https://img.shields.io/github/languages/code-size/V037/RustyClicker">
 
-**Version:** v1.1
+**Version:** v1.2
 
 RustyClicker is a lightweight Windows autoclicker written in Rust. It watches
 the screen for selected image targets and clicks the center of a target when it
@@ -14,12 +14,13 @@ finds one.
   cross-correlation (ZNCC).
 - Configure between 1 and 99 image slots, and advance to the next configured
   target after a click.
-- Choose a click delay from 25 ms to 2 seconds.
+- Set the click interval to any integer from 1 to 10,000 ms (default: 100 ms).
+- Choose 1, 2, 4, or 8 Rayon threads for image matching (default: 2).
 - Use a compact, resizable window with five themes, an optional always-on-top
   setting, and image previews.
 - View the latest scan duration and total click count in the main window.
-- Use a persistent two-thread Rayon pool and SIMD-enabled matching without an
-  OpenCV runtime dependency.
+- Use configurable 1-, 2-, 4-, or 8-thread Rayon pools with SIMD-enabled
+  matching and no OpenCV runtime dependency.
 - Build a standalone executable with the rusty-cursor icon embedded.
 - Store preferences in the per-user Windows app-data folder, independently of
   the executable location.
@@ -49,9 +50,11 @@ cargo run --release
 
 ## Use
 
-1. Open **Settings** and choose how many image slots to use.
+1. Open **Settings** and choose the number of image slots, click interval, and
+   matching thread count.
 2. Select an image for each target slot.
-3. Set the click delay and any preferred theme or always-on-top option.
+3. Set the click interval, matching threads, and any preferred theme or
+   always-on-top option.
 4. Return to the main view and press **Start**.
 
 The app scans the virtual desktop, moves the pointer to the center of a detected
@@ -63,10 +66,10 @@ actual interval depends on capture and matching time and may be longer.
 The matcher uses grayscale ZNCC with a confidence threshold of `0.90`. Template
 data is prepared when an image is loaded. Screen matching uses
 [`corrmatch`](https://crates.io/crates/corrmatch) with its SIMD and Rayon
-features enabled; Rayon is configured with a persistent pool limited to two
-threads. Matching uses a coarse-to-fine image pyramid, so its selected location
-is not guaranteed to be the first row-major match when a target appears more
-than once.
+features enabled. The Rayon pool can be configured to use 1, 2, 4, or 8
+threads, with two threads by default. Matching uses a coarse-to-fine image
+pyramid, so its selected location is not guaranteed to be the first row-major
+match when a target appears more than once.
 
 In a release-mode synthetic benchmark on a 1920×1080 image with a 64×64 target,
 the matcher measured:
