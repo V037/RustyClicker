@@ -1,33 +1,43 @@
 use super::{
-    BUTTON_STYLE, ID_ALWAYS_ON_TOP, ID_BRAND_ICON, ID_CLEAR_IMAGE, ID_CLICKER_BUTTON, ID_CLOSE,
-    ID_CREDIT_LABEL, ID_DELAY_INPUT, ID_EMPTY_PREVIEW, ID_MENU_HOTKEY_LABEL, ID_MENU_STATUS_TITLE,
+    BUTTON_STYLE, ID_ALWAYS_ON_TOP, ID_BRAND_ICON, ID_CLASSICAL_ALWAYS_ON_TOP,
+    ID_CLASSICAL_BUTTON_COMBO, ID_CLASSICAL_BUTTON_LABEL, ID_CLASSICAL_CLOSE,
+    ID_CLASSICAL_DELAY_INPUT, ID_CLASSICAL_DELAY_LABEL, ID_CLASSICAL_NAV_BUTTON,
+    ID_CLASSICAL_START, ID_CLASSICAL_STATS, ID_CLASSICAL_STATUS_LABEL, ID_CLASSICAL_STOP,
+    ID_CLASSICAL_TITLE, ID_CLEAR_IMAGE, ID_CLOSE, ID_CREDIT_LABEL, ID_DELAY_INPUT,
+    ID_EMPTY_PREVIEW, ID_HIDE_WHEN_ACTIVE, ID_HOTKEY_CLOSE_INPUT, ID_HOTKEY_CLOSE_LABEL,
+    ID_HOTKEY_INSTRUCTION, ID_HOTKEY_START_INPUT, ID_HOTKEY_START_LABEL, ID_HOTKEY_STOP_INPUT,
+    ID_HOTKEY_STOP_LABEL, ID_IMAGES_NAV_BUTTON, ID_MENU_HOTKEY_LABEL, ID_MENU_STATUS_TITLE,
     ID_MENU_SUMMARY_LABEL, ID_MENU_TIPS_LABEL, ID_PREVIEW_LABEL, ID_SELECT_IMAGE, ID_SETTINGS,
-    ID_SLOT_COMBO, ID_SLOT_COUNT_COMBO, ID_SLOT_LABEL, ID_START, ID_STATUS_LABEL, ID_STOP,
-    ID_THEME_COMBO, ID_THREAD_COUNT_COMBO, ID_VERSION_LABEL, MAX_IMAGE_COUNT,
+    ID_SETTINGS_HEADING, ID_SLOT_COMBO, ID_SLOT_COUNT_INPUT, ID_SLOT_LABEL, ID_START,
+    ID_STATUS_LABEL, ID_STOP, ID_THEME_COMBO, ID_THREAD_COUNT_COMBO, ID_VERSION_LABEL,
     layout::{layout_controls, update_ui_font},
     logic_gui::{ID_LOGIC_BUTTON, create_logic_controls},
-    preferences::Theme,
+    preferences::{Theme, vk_to_string},
     settings::{
         ID_SETTINGS_DELAY_LABEL, ID_SETTINGS_SLOT_COUNT_LABEL, ID_SETTINGS_THEME_LABEL,
         ID_SETTINGS_THREADS_LABEL, THEMES,
     },
-    state::AppState,
+    state::{AppState, set_text},
     wndproc::make_static_draggable,
 };
+use crate::input::ClickButton;
 use crate::matching::MATCH_THREAD_OPTIONS;
 use windows::{
     Win32::{
-        Foundation::{HWND, LPARAM, WPARAM},
+        Foundation::{HWND, LPARAM, LRESULT, WPARAM},
         Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute},
         UI::{
             Controls::BST_CHECKED,
             HiDpi::GetDpiForWindow,
             WindowsAndMessaging::{
                 BM_SETCHECK, BS_AUTOCHECKBOX, CB_ADDSTRING, CB_SETCURSEL, CBS_DROPDOWNLIST,
-                CreateWindowExW, ES_AUTOHSCROLL, ES_NUMBER, HMENU, HWND_TOPMOST, MB_ICONERROR,
-                MB_ICONWARNING, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-                SendMessageW, SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WINDOW_STYLE, WS_BORDER,
-                WS_CHILD, WS_VISIBLE,
+                CallWindowProcW, CreateWindowExW, DefWindowProcW, ES_AUTOHSCROLL, ES_NUMBER,
+                GWLP_USERDATA, GWLP_WNDPROC, GetDlgCtrlID, GetParent, GetPropW, GetWindowLongPtrW,
+                HMENU, HWND_TOPMOST, MB_ICONERROR, MB_ICONWARNING, SW_HIDE, SW_SHOW,
+                SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SendMessageW, SetPropW, SetWindowLongPtrW,
+                SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CHAR, WM_KEYDOWN,
+                WM_LBUTTONDOWN, WM_SETFOCUS, WM_SYSKEYDOWN, WNDPROC, WS_BORDER, WS_CHILD,
+                WS_VISIBLE,
             },
         },
     },
@@ -62,6 +72,80 @@ pub(crate) unsafe fn create_control(
             None,
         )
         .unwrap_or_default()
+    }
+}
+
+pub(crate) unsafe extern "system" fn hotkey_input_proc(
+    control: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    unsafe {
+        let prev_proc_ptr = GetPropW(control, w!("PrevProc"));
+        let prev_proc: WNDPROC = if prev_proc_ptr.0.is_null() {
+            None
+        } else {
+            std::mem::transmute::<isize, WNDPROC>(prev_proc_ptr.0 as isize)
+        };
+
+        if message == WM_LBUTTONDOWN || message == WM_SETFOCUS {
+            set_text(control, "[ Press a key... ]");
+        } else if message == WM_KEYDOWN || message == WM_SYSKEYDOWN {
+            let vk = wparam.0 as u32;
+            if let Ok(parent) = GetParent(control) {
+                let state_ptr = GetWindowLongPtrW(parent, GWLP_USERDATA) as *mut AppState;
+                if !state_ptr.is_null() {
+                    let ctrl_id = usize::try_from(GetDlgCtrlID(control)).unwrap_or_default();
+                    if vk == 0x1B {
+                        let cur_vk = match ctrl_id {
+                            ID_HOTKEY_START_INPUT => (*state_ptr).start_hotkey,
+                            ID_HOTKEY_STOP_INPUT => (*state_ptr).stop_hotkey,
+                            ID_HOTKEY_CLOSE_INPUT => (*state_ptr).close_hotkey,
+                            _ => 0,
+                        };
+                        set_text(control, &vk_to_string(cur_vk));
+                    } else {
+                        let hotkey_id = match ctrl_id {
+                            ID_HOTKEY_START_INPUT => 1,
+                            ID_HOTKEY_STOP_INPUT => 2,
+                            ID_HOTKEY_CLOSE_INPUT => 3,
+                            _ => 0,
+                        };
+                        if hotkey_id != 0 {
+                            (*state_ptr).set_hotkey(parent, hotkey_id, vk);
+                        }
+                    }
+                }
+                let _ = windows::Win32::UI::Input::KeyboardAndMouse::SetFocus(Some(parent));
+            }
+            return LRESULT(0);
+        } else if message == WM_CHAR {
+            return LRESULT(0);
+        }
+
+        if prev_proc.is_some() {
+            CallWindowProcW(prev_proc, control, message, wparam, lparam)
+        } else {
+            DefWindowProcW(control, message, wparam, lparam)
+        }
+    }
+}
+
+pub(crate) fn make_hotkey_input(control: HWND) {
+    unsafe {
+        let prev_proc = SetWindowLongPtrW(
+            control,
+            GWLP_WNDPROC,
+            hotkey_input_proc as *const () as isize,
+        );
+        if prev_proc != 0 {
+            let _ = SetPropW(
+                control,
+                w!("PrevProc"),
+                Some(windows::Win32::Foundation::HANDLE(prev_proc as *mut _)),
+            );
+        }
     }
 }
 
@@ -103,43 +187,55 @@ pub(crate) unsafe fn create_controls(window: HWND, state: &mut AppState) {
         state.settings_button = create_control(
             window,
             w!("BUTTON"),
-            "Settings",
+            "⚙",
             WINDOW_STYLE(BUTTON_STYLE),
             16,
             12,
-            90,
             30,
+            26,
             ID_SETTINGS,
+        );
+        state.classical_nav_button = create_control(
+            window,
+            w!("BUTTON"),
+            "Classical",
+            WINDOW_STYLE(BUTTON_STYLE),
+            18,
+            56,
+            86,
+            28,
+            ID_CLASSICAL_NAV_BUTTON,
+        );
+        state.images_button = create_control(
+            window,
+            w!("BUTTON"),
+            "Images",
+            WINDOW_STYLE(BUTTON_STYLE),
+            104,
+            56,
+            86,
+            28,
+            ID_IMAGES_NAV_BUTTON,
         );
         state.logic_button = create_control(
             window,
             w!("BUTTON"),
             "Logic",
             WINDOW_STYLE(BUTTON_STYLE),
-            16,
-            12,
-            80,
-            30,
+            198,
+            56,
+            76,
+            28,
             ID_LOGIC_BUTTON,
         );
-        state.clicker_button = create_control(
-            window,
-            w!("BUTTON"),
-            "Clicker",
-            WINDOW_STYLE(BUTTON_STYLE),
-            16,
-            12,
-            80,
-            30,
-            ID_CLICKER_BUTTON,
-        );
+        state.clicker_button = state.images_button;
         state.menu_status_title = create_control(
             window,
             w!("STATIC"),
             "SYSTEM OVERVIEW",
             WINDOW_STYLE(0),
             18,
-            64,
+            96,
             400,
             20,
             ID_MENU_STATUS_TITLE,
@@ -150,7 +246,7 @@ pub(crate) unsafe fn create_controls(window: HWND, state: &mut AppState) {
             "Initializing...",
             WINDOW_STYLE(windows::Win32::System::SystemServices::SS_LEFTNOWORDWRAP.0),
             18,
-            88,
+            120,
             400,
             22,
             ID_MENU_SUMMARY_LABEL,
@@ -158,10 +254,10 @@ pub(crate) unsafe fn create_controls(window: HWND, state: &mut AppState) {
         state.menu_hotkey_label = create_control(
             window,
             w!("STATIC"),
-            "Global Hotkeys:  [F1] Start Detection   •   [F2] Stop Worker   •   [F3] Close",
+            "Global Hotkeys:  [F1] Start Autoclicker   •   [F2] Stop Worker   •   [F3] Close",
             WINDOW_STYLE(windows::Win32::System::SystemServices::SS_LEFTNOWORDWRAP.0),
             18,
-            116,
+            146,
             400,
             22,
             ID_MENU_HOTKEY_LABEL,
@@ -169,15 +265,18 @@ pub(crate) unsafe fn create_controls(window: HWND, state: &mut AppState) {
         state.menu_tips_label = create_control(
             window,
             w!("STATIC"),
-            "Tip: Press F1 anytime to start scanning across all active monitors.",
+            "Tip: Open Classical or Images, then press F1 to start.",
             WINDOW_STYLE(windows::Win32::System::SystemServices::SS_LEFTNOWORDWRAP.0),
             18,
-            144,
+            172,
             400,
             22,
             ID_MENU_TIPS_LABEL,
         );
         state.menu_controls = vec![
+            state.classical_nav_button,
+            state.images_button,
+            state.logic_button,
             state.menu_status_title,
             state.menu_summary_label,
             state.menu_hotkey_label,
@@ -330,20 +429,81 @@ pub(crate) unsafe fn create_controls(window: HWND, state: &mut AppState) {
             40,
             ID_CLOSE,
         );
-        state.always_on_top_checkbox = create_control(
+        let slot_count_label = create_control(
             window,
-            w!("BUTTON"),
-            "Always on top",
-            WINDOW_STYLE(BS_AUTOCHECKBOX as u32),
+            w!("STATIC"),
+            "Number of slots",
+            WINDOW_STYLE(0),
             18,
-            466,
-            112,
-            40,
-            ID_ALWAYS_ON_TOP,
+            74,
+            140,
+            24,
+            ID_SETTINGS_SLOT_COUNT_LABEL,
+        );
+        state.slot_count_input = create_control(
+            window,
+            w!("EDIT"),
+            &state.image_count.to_string(),
+            WINDOW_STYLE(ES_NUMBER as u32 | ES_AUTOHSCROLL as u32 | WS_BORDER.0),
+            18,
+            98,
+            180,
+            26,
+            ID_SLOT_COUNT_INPUT,
+        );
+        state.settings_title = create_control(
+            window,
+            w!("STATIC"),
+            "Click interval (ms)",
+            WINDOW_STYLE(0),
+            18,
+            126,
+            140,
+            24,
+            ID_SETTINGS_DELAY_LABEL,
+        );
+        state.click_delay_input = create_control(
+            window,
+            w!("EDIT"),
+            &state.click_delay_ms.to_string(),
+            WINDOW_STYLE(ES_NUMBER as u32 | ES_AUTOHSCROLL as u32 | WS_BORDER.0),
+            18,
+            150,
+            180,
+            26,
+            ID_DELAY_INPUT,
+        );
+        let thread_count_label = create_control(
+            window,
+            w!("STATIC"),
+            "Scanning threads",
+            WINDOW_STYLE(0),
+            18,
+            178,
+            140,
+            24,
+            ID_SETTINGS_THREADS_LABEL,
+        );
+        state.thread_count_combo = create_control(
+            window,
+            w!("COMBOBOX"),
+            "",
+            WINDOW_STYLE(CBS_DROPDOWNLIST as u32),
+            18,
+            202,
+            180,
+            110,
+            ID_THREAD_COUNT_COMBO,
         );
         state.clicker_controls = vec![
             state.slot_label,
             state.slot_combo,
+            slot_count_label,
+            state.slot_count_input,
+            state.settings_title,
+            state.click_delay_input,
+            thread_count_label,
+            state.thread_count_combo,
             state.preview_label,
             state.preview,
             state.empty_preview,
@@ -354,8 +514,294 @@ pub(crate) unsafe fn create_controls(window: HWND, state: &mut AppState) {
             state.start_button,
             state.stop_button,
             state.close_button,
-            state.always_on_top_checkbox,
         ];
+
+        state.classical_title = create_control(
+            window,
+            w!("STATIC"),
+            "CLASSICAL AUTOCLICKER",
+            WINDOW_STYLE(0),
+            18,
+            56,
+            300,
+            22,
+            ID_CLASSICAL_TITLE,
+        );
+        state.classical_subtitle = create_control(
+            window,
+            w!("STATIC"),
+            "Ultra-fast direct cursor clicking at current mouse position",
+            WINDOW_STYLE(0),
+            18,
+            80,
+            400,
+            18,
+            0,
+        );
+        state.classical_delay_label = create_control(
+            window,
+            w!("STATIC"),
+            "Click interval (ms) [0 = uncapped]",
+            WINDOW_STYLE(0),
+            18,
+            106,
+            260,
+            20,
+            ID_CLASSICAL_DELAY_LABEL,
+        );
+        state.classical_delay_input = create_control(
+            window,
+            w!("EDIT"),
+            &state.classical_delay_ms.to_string(),
+            WINDOW_STYLE(ES_NUMBER as u32 | ES_AUTOHSCROLL as u32 | WS_BORDER.0),
+            18,
+            128,
+            200,
+            26,
+            ID_CLASSICAL_DELAY_INPUT,
+        );
+        state.classical_button_label = create_control(
+            window,
+            w!("STATIC"),
+            "Click button",
+            WINDOW_STYLE(0),
+            18,
+            162,
+            260,
+            20,
+            ID_CLASSICAL_BUTTON_LABEL,
+        );
+        state.classical_button_combo = create_control(
+            window,
+            w!("COMBOBOX"),
+            "",
+            WINDOW_STYLE(CBS_DROPDOWNLIST as u32),
+            18,
+            184,
+            200,
+            100,
+            ID_CLASSICAL_BUTTON_COMBO,
+        );
+        state.classical_stats_label = create_control(
+            window,
+            w!("STATIC"),
+            "Clicks: 0  |  Speed: 0 CPS",
+            WINDOW_STYLE(0),
+            18,
+            222,
+            300,
+            22,
+            ID_CLASSICAL_STATS,
+        );
+        state.classical_status_label = create_control(
+            window,
+            w!("STATIC"),
+            "Ready  |  Press F1 to start, F2 to stop.",
+            WINDOW_STYLE(windows::Win32::System::SystemServices::SS_LEFTNOWORDWRAP.0),
+            20,
+            516,
+            500,
+            28,
+            ID_CLASSICAL_STATUS_LABEL,
+        );
+        state.classical_start_button = create_control(
+            window,
+            w!("BUTTON"),
+            "F1 - Start",
+            WINDOW_STYLE(BUTTON_STYLE),
+            18,
+            466,
+            112,
+            40,
+            ID_CLASSICAL_START,
+        );
+        state.classical_stop_button = create_control(
+            window,
+            w!("BUTTON"),
+            "F2 - Stop",
+            WINDOW_STYLE(BUTTON_STYLE),
+            18,
+            466,
+            112,
+            40,
+            ID_CLASSICAL_STOP,
+        );
+        state.classical_close_button = create_control(
+            window,
+            w!("BUTTON"),
+            "F3 - Close",
+            WINDOW_STYLE(BUTTON_STYLE),
+            18,
+            466,
+            112,
+            40,
+            ID_CLASSICAL_CLOSE,
+        );
+        state.classical_always_on_top_checkbox = create_control(
+            window,
+            w!("BUTTON"),
+            "Always on top",
+            WINDOW_STYLE(BS_AUTOCHECKBOX as u32),
+            18,
+            466,
+            112,
+            40,
+            ID_CLASSICAL_ALWAYS_ON_TOP,
+        );
+        state.classical_controls = vec![
+            state.classical_title,
+            state.classical_subtitle,
+            state.classical_delay_label,
+            state.classical_delay_input,
+            state.classical_button_label,
+            state.classical_button_combo,
+            state.classical_stats_label,
+            state.classical_status_label,
+            state.classical_start_button,
+            state.classical_stop_button,
+            state.classical_close_button,
+            state.classical_always_on_top_checkbox,
+        ];
+        SendMessageW(
+            state.classical_always_on_top_checkbox,
+            BM_SETCHECK,
+            Some(WPARAM(if state.always_on_top {
+                BST_CHECKED.0 as usize
+            } else {
+                0
+            })),
+            Some(LPARAM(0)),
+        );
+
+        state.settings_heading = create_control(
+            window,
+            w!("STATIC"),
+            "SETTINGS",
+            WINDOW_STYLE(0),
+            24,
+            54,
+            260,
+            22,
+            ID_SETTINGS_HEADING,
+        );
+        let theme_label = create_control(
+            window,
+            w!("STATIC"),
+            "Window color",
+            WINDOW_STYLE(0),
+            24,
+            80,
+            260,
+            20,
+            ID_SETTINGS_THEME_LABEL,
+        );
+        state.theme_combo = create_control(
+            window,
+            w!("COMBOBOX"),
+            "",
+            WINDOW_STYLE(CBS_DROPDOWNLIST as u32),
+            24,
+            102,
+            200,
+            110,
+            ID_THEME_COMBO,
+        );
+
+        state.start_hotkey_label = create_control(
+            window,
+            w!("STATIC"),
+            "Start Clicker",
+            WINDOW_STYLE(0),
+            24,
+            140,
+            100,
+            20,
+            ID_HOTKEY_START_LABEL,
+        );
+        state.start_hotkey_input = create_control(
+            window,
+            w!("EDIT"),
+            &vk_to_string(state.start_hotkey),
+            WINDOW_STYLE(ES_AUTOHSCROLL as u32 | WS_BORDER.0),
+            24,
+            162,
+            80,
+            26,
+            ID_HOTKEY_START_INPUT,
+        );
+        make_hotkey_input(state.start_hotkey_input);
+
+        state.stop_hotkey_label = create_control(
+            window,
+            w!("STATIC"),
+            "Stop Worker",
+            WINDOW_STYLE(0),
+            114,
+            140,
+            100,
+            20,
+            ID_HOTKEY_STOP_LABEL,
+        );
+        state.stop_hotkey_input = create_control(
+            window,
+            w!("EDIT"),
+            &vk_to_string(state.stop_hotkey),
+            WINDOW_STYLE(ES_AUTOHSCROLL as u32 | WS_BORDER.0),
+            114,
+            162,
+            80,
+            26,
+            ID_HOTKEY_STOP_INPUT,
+        );
+        make_hotkey_input(state.stop_hotkey_input);
+
+        state.close_hotkey_label = create_control(
+            window,
+            w!("STATIC"),
+            "Close App",
+            WINDOW_STYLE(0),
+            204,
+            140,
+            100,
+            20,
+            ID_HOTKEY_CLOSE_LABEL,
+        );
+        state.close_hotkey_input = create_control(
+            window,
+            w!("EDIT"),
+            &vk_to_string(state.close_hotkey),
+            WINDOW_STYLE(ES_AUTOHSCROLL as u32 | WS_BORDER.0),
+            204,
+            162,
+            80,
+            26,
+            ID_HOTKEY_CLOSE_INPUT,
+        );
+        make_hotkey_input(state.close_hotkey_input);
+
+        state.hotkey_instruction = create_control(
+            window,
+            w!("STATIC"),
+            "Click a hotkey field and press any key to rebind.",
+            WINDOW_STYLE(0),
+            24,
+            196,
+            300,
+            20,
+            ID_HOTKEY_INSTRUCTION,
+        );
+
+        state.always_on_top_checkbox = create_control(
+            window,
+            w!("BUTTON"),
+            "Always on top",
+            WINDOW_STYLE(BS_AUTOCHECKBOX as u32),
+            24,
+            222,
+            200,
+            24,
+            ID_ALWAYS_ON_TOP,
+        );
         SendMessageW(
             state.always_on_top_checkbox,
             BM_SETCHECK,
@@ -367,116 +813,58 @@ pub(crate) unsafe fn create_controls(window: HWND, state: &mut AppState) {
             Some(LPARAM(0)),
         );
 
-        state.settings_title = create_control(
+        state.hide_when_active_checkbox = create_control(
             window,
-            w!("STATIC"),
-            "Click interval (ms)",
-            WINDOW_STYLE(0),
+            w!("BUTTON"),
+            "Hide window when active",
+            WINDOW_STYLE(BS_AUTOCHECKBOX as u32),
             24,
-            55,
-            260,
-            24,
-            ID_SETTINGS_DELAY_LABEL,
-        );
-        state.click_delay_input = create_control(
-            window,
-            w!("EDIT"),
-            &state.click_delay_ms.to_string(),
-            WINDOW_STYLE(ES_NUMBER as u32 | ES_AUTOHSCROLL as u32 | WS_BORDER.0),
-            24,
-            80,
+            248,
             200,
-            26,
-            ID_DELAY_INPUT,
+            24,
+            ID_HIDE_WHEN_ACTIVE,
         );
-        let thread_count_label = create_control(
-            window,
-            w!("STATIC"),
-            "Scanning threads",
-            WINDOW_STYLE(0),
-            24,
-            116,
-            260,
-            24,
-            ID_SETTINGS_THREADS_LABEL,
+        SendMessageW(
+            state.hide_when_active_checkbox,
+            BM_SETCHECK,
+            Some(WPARAM(if state.hide_when_active {
+                BST_CHECKED.0 as usize
+            } else {
+                0
+            })),
+            Some(LPARAM(0)),
         );
-        state.thread_count_combo = create_control(
-            window,
-            w!("COMBOBOX"),
-            "",
-            WINDOW_STYLE(CBS_DROPDOWNLIST as u32),
-            24,
-            140,
-            200,
-            110,
-            ID_THREAD_COUNT_COMBO,
-        );
-        let theme_label = create_control(
-            window,
-            w!("STATIC"),
-            "Window color",
-            WINDOW_STYLE(0),
-            24,
-            178,
-            260,
-            24,
-            ID_SETTINGS_THEME_LABEL,
-        );
-        state.theme_combo = create_control(
-            window,
-            w!("COMBOBOX"),
-            "",
-            WINDOW_STYLE(CBS_DROPDOWNLIST as u32),
-            24,
-            202,
-            200,
-            110,
-            ID_THEME_COMBO,
-        );
-        let slot_count_label = create_control(
-            window,
-            w!("STATIC"),
-            "Number of slots",
-            WINDOW_STYLE(0),
-            24,
-            240,
-            260,
-            24,
-            ID_SETTINGS_SLOT_COUNT_LABEL,
-        );
-        state.slot_count_combo = create_control(
-            window,
-            w!("COMBOBOX"),
-            "",
-            WINDOW_STYLE(CBS_DROPDOWNLIST as u32),
-            24,
-            264,
-            200,
-            120,
-            ID_SLOT_COUNT_COMBO,
-        );
+
         let settings_note = create_control(
             window,
             w!("STATIC"),
             "Changes are saved automatically.",
             WINDOW_STYLE(0),
             24,
-            298,
+            278,
             440,
-            24,
+            20,
             0,
         );
+
         state.settings_controls = vec![
-            state.settings_title,
-            state.click_delay_input,
-            thread_count_label,
-            state.thread_count_combo,
+            state.settings_heading,
             theme_label,
             state.theme_combo,
-            slot_count_label,
-            state.slot_count_combo,
+            state.start_hotkey_label,
+            state.start_hotkey_input,
+            state.stop_hotkey_label,
+            state.stop_hotkey_input,
+            state.close_hotkey_label,
+            state.close_hotkey_input,
+            state.hotkey_instruction,
+            state.always_on_top_checkbox,
+            state.hide_when_active_checkbox,
             settings_note,
         ];
+
+        state.update_hotkey_labels();
+
         create_logic_controls(window, state);
         let mut drag_setup_failed = false;
         for control in [
@@ -499,6 +887,17 @@ pub(crate) unsafe fn create_controls(window: HWND, state: &mut AppState) {
             theme_label,
             slot_count_label,
             settings_note,
+            state.settings_heading,
+            state.start_hotkey_label,
+            state.stop_hotkey_label,
+            state.close_hotkey_label,
+            state.hotkey_instruction,
+            state.classical_title,
+            state.classical_subtitle,
+            state.classical_delay_label,
+            state.classical_button_label,
+            state.classical_stats_label,
+            state.classical_status_label,
         ] {
             drag_setup_failed |= !make_static_draggable(control);
         }
@@ -540,28 +939,37 @@ pub(crate) unsafe fn create_controls(window: HWND, state: &mut AppState) {
                 );
             }
         }
-        for count in 1..=MAX_IMAGE_COUNT {
-            let label = count.to_string();
+        for button in [ClickButton::Left, ClickButton::Right, ClickButton::Middle] {
+            let label = button.name();
             let wide: Vec<u16> = label.encode_utf16().chain(Some(0)).collect();
             SendMessageW(
-                state.slot_count_combo,
+                state.classical_button_combo,
                 CB_ADDSTRING,
                 Some(WPARAM(0)),
                 Some(LPARAM(wide.as_ptr() as isize)),
             );
         }
+        let cur_sel = match state.classical_button {
+            ClickButton::Left => 0,
+            ClickButton::Right => 1,
+            ClickButton::Middle => 2,
+        };
         SendMessageW(
-            state.slot_count_combo,
+            state.classical_button_combo,
             CB_SETCURSEL,
-            Some(WPARAM(state.image_count - 1)),
+            Some(WPARAM(cur_sel)),
             Some(LPARAM(0)),
         );
+
         state.background_brush = state.theme.brush();
         state.surface_brush = state.theme.surface_brush();
         if state.background_brush.is_null() || state.surface_brush.is_null() {
             state.show_message("Could not create the window background.", MB_ICONERROR);
         }
         for control in &state.clicker_controls {
+            let _ = ShowWindow(*control, SW_HIDE);
+        }
+        for control in &state.classical_controls {
             let _ = ShowWindow(*control, SW_HIDE);
         }
         for control in &state.settings_controls {

@@ -1,18 +1,25 @@
 use super::{
-    ID_ALWAYS_ON_TOP, ID_BRAND_ICON, ID_CLEAR_IMAGE, ID_CLICKER_BUTTON, ID_CLOSE, ID_CREDIT_LABEL,
-    ID_DELAY_INPUT, ID_EMPTY_PREVIEW, ID_MENU_HOTKEY_LABEL, ID_MENU_STATUS_TITLE, ID_PREVIEW_LABEL,
-    ID_SELECT_IMAGE, ID_SETTINGS, ID_SLOT_COMBO, ID_SLOT_COUNT_COMBO, ID_SLOT_LABEL, ID_START,
-    ID_STATUS_LABEL, ID_STOP, ID_THEME_COMBO, ID_THREAD_COUNT_COMBO, TIMER_ID,
+    ID_ALWAYS_ON_TOP, ID_BRAND_ICON, ID_CLASSICAL_ALWAYS_ON_TOP, ID_CLASSICAL_BUTTON_COMBO,
+    ID_CLASSICAL_BUTTON_LABEL, ID_CLASSICAL_CLOSE, ID_CLASSICAL_DELAY_INPUT,
+    ID_CLASSICAL_DELAY_LABEL, ID_CLASSICAL_NAV_BUTTON, ID_CLASSICAL_START, ID_CLASSICAL_STATS,
+    ID_CLASSICAL_STATUS_LABEL, ID_CLASSICAL_STOP, ID_CLASSICAL_TITLE, ID_CLEAR_IMAGE,
+    ID_CLICKER_BUTTON, ID_CLOSE, ID_CREDIT_LABEL, ID_DELAY_INPUT, ID_EMPTY_PREVIEW,
+    ID_HIDE_WHEN_ACTIVE, ID_HOTKEY_CLOSE_LABEL, ID_HOTKEY_INSTRUCTION, ID_HOTKEY_START_LABEL,
+    ID_HOTKEY_STOP_LABEL, ID_IMAGES_NAV_BUTTON, ID_MENU_HOTKEY_LABEL, ID_MENU_STATUS_TITLE,
+    ID_MENU_TIPS_LABEL, ID_PREVIEW_LABEL, ID_SELECT_IMAGE, ID_SETTINGS, ID_SETTINGS_HEADING,
+    ID_SLOT_COMBO, ID_SLOT_COUNT_INPUT, ID_SLOT_LABEL, ID_START, ID_STATUS_LABEL, ID_STOP,
+    ID_THEME_COMBO, ID_THREAD_COUNT_COMBO, TIMER_ID,
     controls::create_controls,
     drawing::{draw_button, draw_cursor_icon, draw_empty_preview},
     layout::{layout_controls, scale, update_ui_font},
-    preferences::rgb,
+    preferences::{rgb, vk_to_string},
     settings::{
         ID_SETTINGS_DELAY_LABEL, ID_SETTINGS_SLOT_COUNT_LABEL, ID_SETTINGS_THEME_LABEL,
         ID_SETTINGS_THREADS_LABEL,
     },
     state::{ActivePanel, AppState, set_text},
 };
+use crate::input::ClickButton;
 use std::sync::atomic::Ordering;
 use windows::Win32::{
     Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
@@ -21,7 +28,7 @@ use windows::Win32::{
         Controls::{BST_CHECKED, DRAWITEMSTRUCT, NMHDR, NMTREEVIEWW, TVN_SELCHANGEDW},
         Input::KeyboardAndMouse::{MOD_NOREPEAT, RegisterHotKey, ReleaseCapture, UnregisterHotKey},
         WindowsAndMessaging::{
-            BM_GETCHECK, CB_GETCURSEL, CBN_SELCHANGE, CallWindowProcW, DefWindowProcW,
+            BM_GETCHECK, BM_SETCHECK, CB_GETCURSEL, CBN_SELCHANGE, CallWindowProcW, DefWindowProcW,
             DestroyWindow, EN_KILLFOCUS, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect, GetDlgCtrlID,
             GetParent, GetWindowLongPtrW, GetWindowTextW, HTCAPTION, MB_ICONERROR, MB_ICONWARNING,
             MINMAXINFO, PostMessageW, PostQuitMessage, SWP_NOACTIVATE, SWP_NOZORDER, SendMessageW,
@@ -95,9 +102,13 @@ pub(crate) unsafe extern "system" fn window_proc(
             create_controls(window, &mut *state_ptr);
             let _ = SetTimer(Some(window), TIMER_ID, 250, None);
             let mut unavailable_hotkeys = Vec::new();
-            for (id, key, name) in [(1, 0x70, "F1"), (2, 0x71, "F2"), (3, 0x72, "F3")] {
+            for (id, key) in [
+                (1, (*state_ptr).start_hotkey),
+                (2, (*state_ptr).stop_hotkey),
+                (3, (*state_ptr).close_hotkey),
+            ] {
                 if RegisterHotKey(Some(window), id, MOD_NOREPEAT, key).is_err() {
-                    unavailable_hotkeys.push(name);
+                    unavailable_hotkeys.push(vk_to_string(key));
                 }
             }
             if !unavailable_hotkeys.is_empty() {
@@ -111,7 +122,12 @@ pub(crate) unsafe extern "system" fn window_proc(
             } else {
                 set_text(
                     (*state_ptr).status_label,
-                    "Ready. Global F1, F2, and F3 hotkeys are active.",
+                    &format!(
+                        "Ready. Global [{}], [{}], and [{}] hotkeys are active.",
+                        vk_to_string((*state_ptr).start_hotkey),
+                        vk_to_string((*state_ptr).stop_hotkey),
+                        vk_to_string((*state_ptr).close_hotkey),
+                    ),
                 );
             }
             return LRESULT(0);
@@ -151,6 +167,17 @@ pub(crate) unsafe extern "system" fn window_proc(
                 ID_SETTINGS_SLOT_COUNT_LABEL,
                 ID_MENU_STATUS_TITLE,
                 ID_MENU_HOTKEY_LABEL,
+                ID_MENU_TIPS_LABEL,
+                ID_CLASSICAL_TITLE,
+                ID_CLASSICAL_STATS,
+                ID_CLASSICAL_STATUS_LABEL,
+                ID_CLASSICAL_DELAY_LABEL,
+                ID_CLASSICAL_BUTTON_LABEL,
+                ID_SETTINGS_HEADING,
+                ID_HOTKEY_START_LABEL,
+                ID_HOTKEY_STOP_LABEL,
+                ID_HOTKEY_CLOSE_LABEL,
+                ID_HOTKEY_INSTRUCTION,
                 super::logic_gui::ID_LOGIC_TREE_TITLE,
                 super::logic_gui::ID_LOGIC_PROPS_TITLE,
             ]
@@ -261,20 +288,24 @@ pub(crate) unsafe extern "system" fn window_proc(
                 } else if id == ID_START {
                     state.start(window);
                 } else if id == ID_STOP {
-                    state.stop();
+                    state.stop(window);
                 } else if id == ID_CLOSE {
                     let _ = PostMessageW(Some(window), WM_CLOSE, WPARAM(0), LPARAM(0));
-                } else if id == ID_CLICKER_BUTTON {
-                    if state.active_panel == ActivePanel::Clicker {
-                        state.set_panel(window, ActivePanel::MainMenu);
-                    } else {
-                        state.set_panel(window, ActivePanel::Clicker);
-                    }
+                } else if id == ID_CLASSICAL_START {
+                    state.start_classical(window);
+                } else if id == ID_CLASSICAL_STOP {
+                    state.stop_classical(window);
+                } else if id == ID_CLASSICAL_CLOSE {
+                    let _ = PostMessageW(Some(window), WM_CLOSE, WPARAM(0), LPARAM(0));
+                } else if id == ID_CLASSICAL_NAV_BUTTON {
+                    state.set_panel(window, ActivePanel::Classical);
+                } else if id == ID_IMAGES_NAV_BUTTON || id == ID_CLICKER_BUTTON {
+                    state.set_panel(window, ActivePanel::Clicker);
                 } else if id == ID_SETTINGS {
-                    if state.active_panel == ActivePanel::Settings {
-                        state.set_panel(window, ActivePanel::MainMenu);
-                    } else {
+                    if state.active_panel == ActivePanel::MainMenu {
                         state.set_panel(window, ActivePanel::Settings);
+                    } else {
+                        state.set_panel(window, ActivePanel::MainMenu);
                     }
                 } else if id == super::logic_gui::ID_LOGIC_BUTTON {
                     if state.active_panel == ActivePanel::Logic {
@@ -296,6 +327,60 @@ pub(crate) unsafe extern "system" fn window_proc(
                     )
                     .0 == BST_CHECKED.0 as isize;
                     state.set_always_on_top(window, checked);
+                    let _ = SendMessageW(
+                        state.classical_always_on_top_checkbox,
+                        BM_SETCHECK,
+                        Some(WPARAM(if checked { BST_CHECKED.0 as usize } else { 0 })),
+                        Some(LPARAM(0)),
+                    );
+                } else if id == ID_CLASSICAL_ALWAYS_ON_TOP {
+                    let checked = SendMessageW(
+                        state.classical_always_on_top_checkbox,
+                        BM_GETCHECK,
+                        Some(WPARAM(0)),
+                        Some(LPARAM(0)),
+                    )
+                    .0 == BST_CHECKED.0 as isize;
+                    state.set_always_on_top(window, checked);
+                    let _ = SendMessageW(
+                        state.always_on_top_checkbox,
+                        BM_SETCHECK,
+                        Some(WPARAM(if checked { BST_CHECKED.0 as usize } else { 0 })),
+                        Some(LPARAM(0)),
+                    );
+                } else if id == ID_HIDE_WHEN_ACTIVE {
+                    let checked = SendMessageW(
+                        state.hide_when_active_checkbox,
+                        BM_GETCHECK,
+                        Some(WPARAM(0)),
+                        Some(LPARAM(0)),
+                    )
+                    .0 == BST_CHECKED.0 as isize;
+                    state.set_hide_when_active(checked);
+                } else if id == ID_CLASSICAL_DELAY_INPUT && notification == EN_KILLFOCUS as usize {
+                    let mut value = [0u16; 32];
+                    let length = GetWindowTextW(state.classical_delay_input, &mut value);
+                    let delay = usize::try_from(length)
+                        .ok()
+                        .and_then(|length| String::from_utf16(&value[..length]).ok())
+                        .and_then(|value| value.parse::<u64>().ok())
+                        .unwrap_or(50);
+                    state.set_classical_delay(delay);
+                } else if id == ID_CLASSICAL_BUTTON_COMBO && notification == CBN_SELCHANGE as usize
+                {
+                    let selection = SendMessageW(
+                        state.classical_button_combo,
+                        CB_GETCURSEL,
+                        Some(WPARAM(0)),
+                        Some(LPARAM(0)),
+                    )
+                    .0;
+                    let btn = match selection {
+                        1 => ClickButton::Right,
+                        2 => ClickButton::Middle,
+                        _ => ClickButton::Left,
+                    };
+                    state.set_classical_button(btn);
                 } else if id == ID_DELAY_INPUT && notification == EN_KILLFOCUS as usize {
                     let mut value = [0u16; 32];
                     let length = GetWindowTextW(state.click_delay_input, &mut value);
@@ -327,17 +412,15 @@ pub(crate) unsafe extern "system" fn window_proc(
                     if let Ok(selection) = usize::try_from(selection) {
                         state.set_theme(window, selection);
                     }
-                } else if id == ID_SLOT_COUNT_COMBO && notification == CBN_SELCHANGE as usize {
-                    let selection = SendMessageW(
-                        state.slot_count_combo,
-                        CB_GETCURSEL,
-                        Some(WPARAM(0)),
-                        Some(LPARAM(0)),
-                    )
-                    .0;
-                    if let Ok(selection) = usize::try_from(selection) {
-                        state.set_image_count(window, selection + 1);
-                    }
+                } else if id == ID_SLOT_COUNT_INPUT && notification == EN_KILLFOCUS as usize {
+                    let mut value = [0u16; 32];
+                    let length = GetWindowTextW(state.slot_count_input, &mut value);
+                    let count = usize::try_from(length)
+                        .ok()
+                        .and_then(|length| String::from_utf16(&value[..length]).ok())
+                        .and_then(|value| value.parse::<usize>().ok())
+                        .unwrap_or_default();
+                    state.set_image_count(window, count);
                 }
                 LRESULT(0)
             }
@@ -356,8 +439,12 @@ pub(crate) unsafe extern "system" fn window_proc(
             }
             WM_HOTKEY => {
                 match wparam.0 {
-                    1 => state.start(window),
-                    2 => state.stop(),
+                    1 => match state.active_panel {
+                        ActivePanel::Clicker => state.start(window),
+                        ActivePanel::Classical => state.start_classical(window),
+                        ActivePanel::MainMenu | ActivePanel::Logic | ActivePanel::Settings => {}
+                    },
+                    2 => state.stop(window),
                     3 => {
                         let _ = PostMessageW(Some(window), WM_CLOSE, WPARAM(0), LPARAM(0));
                     }
@@ -366,22 +453,51 @@ pub(crate) unsafe extern "system" fn window_proc(
                 LRESULT(0)
             }
             WM_KEYDOWN => {
-                match wparam.0 {
-                    0x70 => state.start(window),
-                    0x71 => state.stop(),
-                    0x72 => {
-                        let _ = PostMessageW(Some(window), WM_CLOSE, WPARAM(0), LPARAM(0));
+                let key = wparam.0 as u32;
+                if key == state.start_hotkey {
+                    match state.active_panel {
+                        ActivePanel::Clicker => state.start(window),
+                        ActivePanel::Classical => state.start_classical(window),
+                        ActivePanel::MainMenu | ActivePanel::Logic | ActivePanel::Settings => {}
                     }
-                    _ => return DefWindowProcW(window, message, wparam, lparam),
+                } else if key == state.stop_hotkey {
+                    state.stop(window);
+                } else if key == state.close_hotkey {
+                    let _ = PostMessageW(Some(window), WM_CLOSE, WPARAM(0), LPARAM(0));
+                } else {
+                    return DefWindowProcW(window, message, wparam, lparam);
                 }
                 LRESULT(0)
             }
             WM_TIMER if wparam.0 == TIMER_ID => {
+                if let Some(ref worker) = state.classical_worker {
+                    let clicks = worker.clicks();
+                    let cps = worker.cps();
+                    if !worker.is_running() {
+                        state.restore_window(window);
+                        set_text(
+                            state.classical_stats_label,
+                            &format!("Stopped | Clicks: {clicks} | Speed: {cps} CPS"),
+                        );
+                        let start_str = vk_to_string(state.start_hotkey);
+                        set_text(
+                            state.classical_status_label,
+                            &format!("Stopped. Press {start_str} to start."),
+                        );
+                        state.classical_worker = None;
+                    } else {
+                        set_text(
+                            state.classical_stats_label,
+                            &format!("Clicks: {clicks} | Speed: {cps} CPS"),
+                        );
+                    }
+                }
                 let worker_finished = state
                     .worker
                     .as_ref()
                     .is_some_and(|worker| !worker.running.load(Ordering::Acquire));
                 if worker_finished {
+                    state.restore_window(window);
                     if let Some(worker) = state.worker.take() {
                         let clicks = worker.clicks.load(Ordering::Relaxed);
                         let scan_ms =
@@ -392,10 +508,13 @@ pub(crate) unsafe extern "system" fn window_proc(
                             .unwrap_or_else(std::sync::PoisonError::into_inner)
                             .as_ref()
                             .map(ToString::to_string);
+                        let start_str = vk_to_string(state.start_hotkey);
                         let status = if let Some(message) = error {
                             message
                         } else {
-                            format!("Stopped | {clicks} clicks | Scan: {scan_ms:.2} ms")
+                            format!(
+                                "Stopped | {clicks} clicks | Scan: {scan_ms:.2} ms | Press {start_str} to start"
+                            )
                         };
                         state.set_running_ui(window, false);
                         set_text(state.status_label, &status);
@@ -412,7 +531,9 @@ pub(crate) unsafe extern "system" fn window_proc(
                 LRESULT(0)
             }
             WM_CLOSE => {
+                state.restore_window(window);
                 state.save_preferences();
+                state.stop_classical(window);
                 if let Some(worker) = &state.worker {
                     worker.stop.store(true, Ordering::Release);
                 }

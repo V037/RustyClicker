@@ -1,5 +1,6 @@
 use super::{
-    ID_CLEAR_IMAGE, ID_CLICKER_BUTTON, ID_CLOSE, ID_SETTINGS, ID_START, MAX_IMAGE_COUNT,
+    ID_CLASSICAL_CLOSE, ID_CLASSICAL_NAV_BUTTON, ID_CLASSICAL_START, ID_CLEAR_IMAGE,
+    ID_CLICKER_BUTTON, ID_CLOSE, ID_IMAGES_NAV_BUTTON, ID_SETTINGS, ID_START, MAX_IMAGE_COUNT,
     gdi::OwnedGdiObject,
     preferences::{Theme, darken, rgb},
     state::{ActivePanel, AppState, set_text},
@@ -15,7 +16,7 @@ use windows::Win32::{
     UI::WindowsAndMessaging::{CB_SETCURSEL, MB_ICONERROR, MB_ICONWARNING, SendMessageW},
 };
 
-pub(crate) const DEFAULT_IMAGE_COUNT: usize = 10;
+pub(crate) const DEFAULT_IMAGE_COUNT: usize = 3;
 pub(crate) const ID_SETTINGS_DELAY_LABEL: usize = 300;
 pub(crate) const ID_SETTINGS_THEME_LABEL: usize = 301;
 pub(crate) const ID_SETTINGS_SLOT_COUNT_LABEL: usize = 305;
@@ -64,12 +65,17 @@ impl Theme {
         let primary = id == ID_START
             || id == ID_SETTINGS
             || id == ID_CLICKER_BUTTON
+            || id == ID_CLASSICAL_NAV_BUTTON
+            || id == ID_IMAGES_NAV_BUTTON
+            || id == ID_CLASSICAL_START
             || id == super::logic_gui::ID_LOGIC_BUTTON
             || id == super::logic_gui::ID_LOGIC_APPLY_BTN
             || id == super::logic_gui::ID_LOGIC_SAVE_BTN
             || id == super::logic_gui::ID_LOGIC_LOAD_BTN;
-        let danger =
-            id == ID_CLOSE || id == ID_CLEAR_IMAGE || id == super::logic_gui::ID_LOGIC_DELETE_BTN;
+        let danger = id == ID_CLOSE
+            || id == ID_CLASSICAL_CLOSE
+            || id == ID_CLEAR_IMAGE
+            || id == super::logic_gui::ID_LOGIC_DELETE_BTN;
         let danger_accent = rgb(244, 63, 63);
         let fill = if primary {
             if selected { darken(surface) } else { surface }
@@ -181,6 +187,7 @@ impl AppState {
 
     pub(crate) fn set_image_count(&mut self, window: HWND, count: usize) {
         if !(1..=MAX_IMAGE_COUNT).contains(&count) {
+            set_text(self.slot_count_input, &self.image_count.to_string());
             self.show_message("Choose between 1 and 99 image slots.", MB_ICONWARNING);
             return;
         }
@@ -196,6 +203,7 @@ impl AppState {
                 Some(LPARAM(0)),
             );
         }
+        set_text(self.slot_count_input, &count.to_string());
         self.refresh_slot_names();
         self.update_menu_summary();
         if self.active_panel == ActivePanel::Clicker

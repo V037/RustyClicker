@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 mod capture;
+mod classical_worker;
 mod core;
 mod gui;
 mod input;

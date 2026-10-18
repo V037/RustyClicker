@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.3.1] - 2026-10-18 (Stable)
+
+> **Note:** This is a stable release introducing the Classical Autoclicker, dynamic hotkey remapping, and UI refinements.
+
+### Added
+
+- **Classical Autoclicker**: High-performance direct cursor autoclicker at current mouse position with configurable delay (ms) down to 0 ms (uncapped), mouse button selection (Left, Right, Middle), and live real-time CPS & total click metrics.
+- **Customizable Global Hotkeys**: Interactive single-keypress hotkey rebinding in Settings for Start, Stop, and Close hotkeys (defaulting to F1, F2, F3).
+- **Stealth Window Mode ("Hide when active")**: Optional setting to automatically hide the window (`SW_HIDE`) while either autoclicker is running and restore it upon stopping.
+- **Mechanical Vector Gear Icon**: Crisp 8-tooth GDI vector gear icon for Settings that scales with DPI and matches theme palette outlines.
+
+### Changed
+
+- **Grouped Main Menu Navigation**: Repositioned `[ Classical | Images ]` and `[ Logic ]` navigation buttons with proper spacing below title and header.
+- **Images Clicker Settings Organization**: Moved click interval, number of slots, and scanning threads directly into the Images Clicker panel.
+- **Always on Top Placement**: Relocated "Always on top" checkbox into the Settings panel.
+- **Dynamic Hotkey Tips & Status Messages**: Main Menu tip, Classical Clicker bottom message, Images Clicker status, and button labels dynamically reflect active hotkeys.
+
+### Fixed
+
+- **Context-Sensitive Start Hotkey**: Restricted the Start hotkey so it only activates the autoclicker corresponding to the open panel (`Classical` or `Images`), ignoring presses on Main Menu, Settings, or Logic Builder, while preserving global access for Stop and Close.
+- **Theme Palette Theming on Classical Status**: Assigned `ID_CLASSICAL_STATUS_LABEL` and hooked `WM_CTLCOLORSTATIC` so Classical Clicker status text renders in the active theme accent color.
+
 ## [1.3.0] - 2026-10-18 (Experimental)
 
 > **Note:** This is an experimental release featuring GPU-accelerated screen capture and the PolyForm Noncommercial License.

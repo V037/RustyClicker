@@ -21,6 +21,75 @@ pub(crate) enum Theme {
     Purple,
 }
 
+use crate::input::ClickButton;
+
+pub(crate) const DEFAULT_CLASSICAL_DELAY_MS: u64 = 50;
+pub(crate) const DEFAULT_START_HOTKEY: u32 = 0x70; // VK_F1
+pub(crate) const DEFAULT_STOP_HOTKEY: u32 = 0x71; // VK_F2
+pub(crate) const DEFAULT_CLOSE_HOTKEY: u32 = 0x72; // VK_F3
+
+pub(crate) const fn default_classical_delay_ms() -> u64 {
+    DEFAULT_CLASSICAL_DELAY_MS
+}
+
+pub(crate) const fn default_start_hotkey() -> u32 {
+    DEFAULT_START_HOTKEY
+}
+
+pub(crate) const fn default_stop_hotkey() -> u32 {
+    DEFAULT_STOP_HOTKEY
+}
+
+pub(crate) const fn default_close_hotkey() -> u32 {
+    DEFAULT_CLOSE_HOTKEY
+}
+
+pub(crate) fn normalize_classical_delay_ms(delay: u64) -> u64 {
+    delay.min(10000)
+}
+
+pub(crate) fn vk_to_string(vk: u32) -> String {
+    match vk {
+        0x70..=0x87 => format!("F{}", vk - 0x70 + 1),
+        0x30..=0x39 => format!("{}", (vk as u8) as char),
+        0x41..=0x5A => format!("{}", (vk as u8) as char),
+        0x20 => "Space".to_owned(),
+        0x0D => "Enter".to_owned(),
+        0x09 => "Tab".to_owned(),
+        0x1B => "Esc".to_owned(),
+        0x2E => "Del".to_owned(),
+        0x2D => "Ins".to_owned(),
+        0x24 => "Home".to_owned(),
+        0x23 => "End".to_owned(),
+        0x21 => "PgUp".to_owned(),
+        0x22 => "PgDn".to_owned(),
+        0x25 => "Left".to_owned(),
+        0x26 => "Up".to_owned(),
+        0x27 => "Right".to_owned(),
+        0x28 => "Down".to_owned(),
+        0x60..=0x69 => format!("Num {}", vk - 0x60),
+        _ => {
+            unsafe {
+                let scan_code = windows::Win32::UI::Input::KeyboardAndMouse::MapVirtualKeyW(
+                    vk,
+                    windows::Win32::UI::Input::KeyboardAndMouse::MAPVK_VK_TO_VSC,
+                );
+                if scan_code != 0 {
+                    let mut buf = [0u16; 64];
+                    let len = windows::Win32::UI::Input::KeyboardAndMouse::GetKeyNameTextW(
+                        (scan_code << 16) as i32,
+                        &mut buf,
+                    );
+                    if len > 0 {
+                        return String::from_utf16_lossy(&buf[..len as usize]);
+                    }
+                }
+            }
+            format!("0x{:X}", vk)
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub(crate) struct Preferences {
     #[serde(default)]
@@ -35,6 +104,18 @@ pub(crate) struct Preferences {
     pub(crate) theme: Theme,
     #[serde(default = "default_image_count")]
     pub(crate) image_count: usize,
+    #[serde(default = "default_classical_delay_ms")]
+    pub(crate) classical_delay_ms: u64,
+    #[serde(default)]
+    pub(crate) classical_button: ClickButton,
+    #[serde(default = "default_start_hotkey")]
+    pub(crate) start_hotkey: u32,
+    #[serde(default = "default_stop_hotkey")]
+    pub(crate) stop_hotkey: u32,
+    #[serde(default = "default_close_hotkey")]
+    pub(crate) close_hotkey: u32,
+    #[serde(default)]
+    pub(crate) hide_when_active: bool,
 }
 
 impl Default for Preferences {
@@ -46,6 +127,12 @@ impl Default for Preferences {
             match_threads: default_match_threads(),
             theme: Theme::default(),
             image_count: default_image_count(),
+            classical_delay_ms: default_classical_delay_ms(),
+            classical_button: ClickButton::default(),
+            start_hotkey: default_start_hotkey(),
+            stop_hotkey: default_stop_hotkey(),
+            close_hotkey: default_close_hotkey(),
+            hide_when_active: false,
         }
     }
 }
@@ -124,6 +211,12 @@ impl AppState {
         self.match_threads = normalize_match_threads(preferences.match_threads);
         self.theme = preferences.theme;
         self.image_count = preferences.image_count.clamp(1, MAX_IMAGE_COUNT);
+        self.classical_delay_ms = normalize_classical_delay_ms(preferences.classical_delay_ms);
+        self.classical_button = preferences.classical_button;
+        self.start_hotkey = preferences.start_hotkey;
+        self.stop_hotkey = preferences.stop_hotkey;
+        self.close_hotkey = preferences.close_hotkey;
+        self.hide_when_active = preferences.hide_when_active;
 
         let mut missing_images = false;
         for (index, path) in preferences
@@ -167,6 +260,12 @@ impl AppState {
             match_threads: self.match_threads,
             theme: self.theme,
             image_count: self.image_count,
+            classical_delay_ms: self.classical_delay_ms,
+            classical_button: self.classical_button,
+            start_hotkey: self.start_hotkey,
+            stop_hotkey: self.stop_hotkey,
+            close_hotkey: self.close_hotkey,
+            hide_when_active: self.hide_when_active,
         };
         let contents = match serde_json::to_vec_pretty(&preferences) {
             Ok(contents) => contents,

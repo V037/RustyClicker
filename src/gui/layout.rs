@@ -74,8 +74,11 @@ pub(crate) fn update_ui_font(state: &mut AppState, dpi: u32) {
             .chain(std::iter::once(state.settings_button))
             .chain(std::iter::once(state.logic_button))
             .chain(std::iter::once(state.clicker_button))
+            .chain(std::iter::once(state.classical_nav_button))
+            .chain(std::iter::once(state.images_button))
             .chain(state.menu_controls.iter().copied())
             .chain(state.clicker_controls.iter().copied())
+            .chain(state.classical_controls.iter().copied())
             .chain(state.settings_controls.iter().copied())
             .chain(state.logic_controls.iter().copied())
         {
@@ -118,58 +121,26 @@ pub(crate) fn layout_controls(window: HWND, state: &AppState) {
         let margin = scale(14, s);
         let content_width = (width - margin * 2).max(1);
 
-        // Top Navigation buttons coordinates (stay at top right)
+        // Top Navigation: gear button or back button at top right
         let btn_h = scale(26, s);
         let btn_y = scale(8, s);
         let x_buttons_left = match state.active_panel {
             ActivePanel::MainMenu => {
-                let settings_btn_w = scale(68, s);
-                let logic_btn_w = scale(54, s);
-                let clicker_btn_w = scale(62, s);
-                let btn_gap = scale(5, s);
-
-                let x_settings = width - margin - settings_btn_w;
-                let x_logic = x_settings - btn_gap - logic_btn_w;
-                let x_clicker = x_logic - btn_gap - clicker_btn_w;
-
-                move_control(
-                    state.settings_button,
-                    x_settings,
-                    btn_y,
-                    settings_btn_w,
-                    btn_h,
-                );
-                move_control(state.logic_button, x_logic, btn_y, logic_btn_w, btn_h);
-                move_control(state.clicker_button, x_clicker, btn_y, clicker_btn_w, btn_h);
-                x_clicker
+                let gear_w = scale(34, s);
+                let gear_h = scale(30, s);
+                let x_gear = width - margin - gear_w;
+                move_control(state.settings_button, x_gear, scale(6, s), gear_w, gear_h);
+                x_gear
             }
-            ActivePanel::Clicker => {
-                let back_w = scale(76, s);
-                let x_back = width - margin - back_w;
-                move_control(state.clicker_button, x_back, btn_y, back_w, btn_h);
-                move_control(state.logic_button, -1000, -1000, 1, 1);
-                move_control(state.settings_button, -1000, -1000, 1, 1);
-                x_back
-            }
-            ActivePanel::Logic => {
-                let back_w = scale(76, s);
-                let x_back = width - margin - back_w;
-                move_control(state.logic_button, x_back, btn_y, back_w, btn_h);
-                move_control(state.clicker_button, -1000, -1000, 1, 1);
-                move_control(state.settings_button, -1000, -1000, 1, 1);
-                x_back
-            }
-            ActivePanel::Settings => {
+            _ => {
                 let back_w = scale(76, s);
                 let x_back = width - margin - back_w;
                 move_control(state.settings_button, x_back, btn_y, back_w, btn_h);
-                move_control(state.clicker_button, -1000, -1000, 1, 1);
-                move_control(state.logic_button, -1000, -1000, 1, 1);
                 x_back
             }
         };
 
-        // Header - Row 1: Brand Icon & App Title (width strictly constrained to not overlap top-right buttons)
+        // Header - Row 1: Brand Icon & App Title
         let icon_size = scale(26, s);
         move_control(
             state.main_brand_icon,
@@ -189,7 +160,7 @@ pub(crate) fn layout_controls(window: HWND, state: &AppState) {
             scale(28, s),
         );
 
-        // Header - Row 2: Version number and Credits (placed cleanly below row 1, completely clear of top buttons)
+        // Header - Row 2: Version number and Credits
         let sub_y = scale(35, s);
         let version_w = scale(44, s);
         move_control(state.version_label, title_x, sub_y, version_w, scale(16, s));
@@ -198,6 +169,7 @@ pub(crate) fn layout_controls(window: HWND, state: &AppState) {
         move_control(state.credit_label, credit_x, sub_y, credit_w, scale(16, s));
 
         layout_main_menu_controls(width, height, margin, content_width, s, state);
+        layout_classical_controls(width, height, margin, content_width, s, state);
         layout_clicker_controls(width, height, margin, content_width, s, state);
         layout_settings_controls(width, height, margin, content_width, s, state);
         super::logic_gui::layout_logic_controls(width, height, margin, s, state);
@@ -212,7 +184,37 @@ fn layout_main_menu_controls(
     s: f32,
     state: &AppState,
 ) {
-    let card_top = scale(60, s);
+    let nav_y = scale(62, s);
+    let nav_h = scale(28, s);
+
+    let classical_w = scale(86, s);
+    let images_w = scale(86, s);
+    let logic_w = scale(76, s);
+    let gap = scale(8, s);
+
+    move_control(
+        state.classical_nav_button,
+        margin,
+        nav_y,
+        classical_w,
+        nav_h,
+    );
+    move_control(
+        state.images_button,
+        margin + classical_w,
+        nav_y,
+        images_w,
+        nav_h,
+    );
+    move_control(
+        state.logic_button,
+        margin + classical_w + images_w + gap,
+        nav_y,
+        logic_w,
+        nav_h,
+    );
+
+    let card_top = nav_y + nav_h + scale(14, s);
     move_control(
         state.menu_status_title,
         margin,
@@ -243,6 +245,121 @@ fn layout_main_menu_controls(
     );
 }
 
+fn layout_classical_controls(
+    _width: i32,
+    height: i32,
+    margin: i32,
+    content_width: i32,
+    s: f32,
+    state: &AppState,
+) {
+    let status_h = scale(20, s);
+    let status_y = height - scale(24, s);
+
+    let action_h = scale(30, s);
+    let action_y = status_y - action_h - scale(4, s);
+    let action_gap = scale(5, s);
+    let button_width = (content_width - action_gap * 2) / 3;
+    let button_width_last = content_width - (button_width + action_gap) * 2;
+
+    move_control(
+        state.classical_start_button,
+        margin,
+        action_y,
+        button_width,
+        action_h,
+    );
+    move_control(
+        state.classical_stop_button,
+        margin + button_width + action_gap,
+        action_y,
+        button_width,
+        action_h,
+    );
+    move_control(
+        state.classical_close_button,
+        margin + (button_width + action_gap) * 2,
+        action_y,
+        button_width_last,
+        action_h,
+    );
+
+    let checkbox_h = scale(22, s);
+    let checkbox_y = action_y - checkbox_h - scale(4, s);
+    move_control(
+        state.classical_always_on_top_checkbox,
+        margin,
+        checkbox_y,
+        content_width,
+        checkbox_h,
+    );
+
+    move_control(
+        state.classical_status_label,
+        margin,
+        status_y,
+        content_width,
+        status_h,
+    );
+
+    let top_y = scale(52, s);
+    move_control(
+        state.classical_title,
+        margin,
+        top_y,
+        content_width,
+        scale(22, s),
+    );
+    move_control(
+        state.classical_subtitle,
+        margin,
+        top_y + scale(22, s),
+        content_width,
+        scale(18, s),
+    );
+
+    let delay_lbl_y = top_y + scale(46, s);
+    move_control(
+        state.classical_delay_label,
+        margin,
+        delay_lbl_y,
+        scale(260, s),
+        scale(20, s),
+    );
+    move_control(
+        state.classical_delay_input,
+        margin,
+        delay_lbl_y + scale(20, s),
+        scale(200, s),
+        scale(26, s),
+    );
+
+    let btn_lbl_y = delay_lbl_y + scale(52, s);
+    move_control(
+        state.classical_button_label,
+        margin,
+        btn_lbl_y,
+        scale(260, s),
+        scale(20, s),
+    );
+    move_control(
+        state.classical_button_combo,
+        margin,
+        btn_lbl_y + scale(20, s),
+        scale(200, s),
+        scale(100, s),
+    );
+
+    let stats_y = btn_lbl_y + scale(54, s);
+    move_control(
+        state.classical_stats_label,
+        margin,
+        stats_y,
+        content_width,
+        scale(22, s),
+    );
+}
+
 fn layout_clicker_controls(
     _width: i32,
     height: i32,
@@ -257,12 +374,10 @@ fn layout_clicker_controls(
         .is_some_and(|worker| worker.running.load(Ordering::Acquire));
 
     // Bottom action controls:
-    // 1. Status label at the very bottom
     let status_h = scale(20, s);
-    let status_y = height - scale(24, s);
+    let status_y = height - scale(22, s);
 
-    // 2. Three action buttons (Start, Stop, Close) side-by-side above status
-    let action_h = scale(30, s);
+    let action_h = scale(28, s);
     let action_y = status_y - action_h - scale(4, s);
     let action_gap = scale(5, s);
     let button_width = (content_width - action_gap * 2) / 3;
@@ -284,18 +399,6 @@ fn layout_clicker_controls(
         action_h,
     );
 
-    // 3. "Always on top" checkbox directly ON TOP of the three buttons
-    let checkbox_h = scale(22, s);
-    let checkbox_y = action_y - checkbox_h - scale(4, s);
-    move_control(
-        state.always_on_top_checkbox,
-        margin,
-        checkbox_y,
-        content_width,
-        checkbox_h,
-    );
-
-    // Status label
     move_control(
         state.status_label,
         margin,
@@ -304,14 +407,14 @@ fn layout_clicker_controls(
         status_h,
     );
 
-    // Image selector controls directly above the checkbox
-    let selector_h = scale(28, s);
-    let selector_y = checkbox_y - selector_h - scale(6, s);
-    let image_name_h = scale(20, s);
+    // Image selector buttons above action buttons
+    let selector_h = scale(26, s);
+    let selector_y = action_y - selector_h - scale(5, s);
+    let image_name_h = scale(18, s);
     let image_name_y = if running {
-        scale(100, s)
+        scale(140, s)
     } else {
-        selector_y - image_name_h - scale(4, s)
+        selector_y - image_name_h - scale(3, s)
     };
 
     let select_width = (content_width * 3 / 5).min(scale(180, s));
@@ -337,37 +440,72 @@ fn layout_clicker_controls(
         image_name_h,
     );
 
-    // Target slot header controls
-    move_control(
-        state.slot_label,
-        margin,
-        scale(56, s),
-        scale(130, s),
-        scale(18, s),
-    );
+    // Top configuration rows in Image Clicker panel
+    let col_gap = scale(8, s);
+    let col_w = (content_width - col_gap) / 2;
+    let col2_x = margin + col_w + col_gap;
+
+    // Row 1: Target slot & Number of slots
+    let row1_y = scale(50, s);
+    move_control(state.slot_label, margin, row1_y, col_w, scale(18, s));
     move_control(
         state.slot_combo,
         margin,
-        scale(76, s),
-        content_width,
-        scale(220, s),
+        row1_y + scale(18, s),
+        col_w,
+        scale(180, s),
     );
+
+    if let Some(lbl) = state.clicker_controls.get(2) {
+        move_control(*lbl, col2_x, row1_y, col_w, scale(18, s));
+    }
+    move_control(
+        state.slot_count_input,
+        col2_x,
+        row1_y + scale(18, s),
+        col_w,
+        scale(24, s),
+    );
+
+    // Row 2: Click interval (ms) & Scanning threads
+    let row2_y = row1_y + scale(46, s);
+    move_control(state.settings_title, margin, row2_y, col_w, scale(18, s));
+    move_control(
+        state.click_delay_input,
+        margin,
+        row2_y + scale(18, s),
+        col_w,
+        scale(24, s),
+    );
+
+    if let Some(lbl) = state.clicker_controls.get(6) {
+        move_control(*lbl, col2_x, row2_y, col_w, scale(18, s));
+    }
+    move_control(
+        state.thread_count_combo,
+        col2_x,
+        row2_y + scale(18, s),
+        col_w,
+        scale(110, s),
+    );
+
+    // Row 3: Preview Area
+    let preview_lbl_y = row2_y + scale(46, s);
     move_control(
         state.preview_label,
         margin,
-        scale(104, s),
+        preview_lbl_y,
         content_width,
         scale(18, s),
     );
 
-    // Preview area - dynamic height that smoothly adapts to compact and tall windows
-    let preview_top = scale(126, s);
+    let preview_top = preview_lbl_y + scale(18, s);
     let preview_bottom_limit = if running {
-        selector_y - scale(6, s)
+        selector_y - scale(5, s)
     } else {
-        image_name_y - scale(6, s)
+        image_name_y - scale(4, s)
     };
-    let preview_height = (preview_bottom_limit - preview_top).max(scale(50, s));
+    let preview_height = (preview_bottom_limit - preview_top).max(scale(35, s));
 
     move_control(
         state.preview,
@@ -394,50 +532,92 @@ fn layout_settings_controls(
     state: &AppState,
 ) {
     move_control(
-        state.settings_title,
+        state.settings_heading,
         margin,
-        scale(55, s),
-        scale(260, s),
-        scale(24, s),
+        scale(50, s),
+        content_width,
+        scale(22, s),
     );
-    move_control(
-        state.click_delay_input,
-        margin,
-        scale(80, s),
-        scale(200, s),
-        scale(26, s),
-    );
-    if let Some(label) = state.settings_controls.get(2) {
-        move_control(*label, margin, scale(116, s), scale(260, s), scale(24, s));
-    }
-    move_control(
-        state.thread_count_combo,
-        margin,
-        scale(140, s),
-        scale(200, s),
-        scale(110, s),
-    );
-    if let Some(label) = state.settings_controls.get(4) {
-        move_control(*label, margin, scale(178, s), scale(260, s), scale(24, s));
+
+    // Theme (Window color)
+    if let Some(lbl) = state.settings_controls.get(1) {
+        move_control(*lbl, margin, scale(74, s), content_width, scale(18, s));
     }
     move_control(
         state.theme_combo,
         margin,
-        scale(202, s),
-        scale(200, s),
+        scale(94, s),
+        scale(180, s),
         scale(110, s),
     );
-    if let Some(label) = state.settings_controls.get(6) {
-        move_control(*label, margin, scale(240, s), scale(260, s), scale(24, s));
-    }
+
+    // Hotkeys Section (Start, Stop, Close)
+    let col3_gap = scale(6, s);
+    let col3_w = (content_width - col3_gap * 2) / 3;
+    let y_lbl = scale(126, s);
+    let y_inp = scale(146, s);
+
     move_control(
-        state.slot_count_combo,
+        state.start_hotkey_label,
         margin,
-        scale(264, s),
-        scale(200, s),
-        scale(120, s),
+        y_lbl,
+        col3_w,
+        scale(18, s),
     );
-    if let Some(note) = state.settings_controls.get(8) {
-        move_control(*note, margin, scale(298, s), content_width, scale(24, s));
+    move_control(
+        state.start_hotkey_input,
+        margin,
+        y_inp,
+        col3_w,
+        scale(24, s),
+    );
+
+    let col1_x = margin + col3_w + col3_gap;
+    move_control(state.stop_hotkey_label, col1_x, y_lbl, col3_w, scale(18, s));
+    move_control(state.stop_hotkey_input, col1_x, y_inp, col3_w, scale(24, s));
+
+    let col2_x = margin + (col3_w + col3_gap) * 2;
+    move_control(
+        state.close_hotkey_label,
+        col2_x,
+        y_lbl,
+        col3_w,
+        scale(18, s),
+    );
+    move_control(
+        state.close_hotkey_input,
+        col2_x,
+        y_inp,
+        col3_w,
+        scale(24, s),
+    );
+
+    move_control(
+        state.hotkey_instruction,
+        margin,
+        scale(174, s),
+        content_width,
+        scale(18, s),
+    );
+
+    // Window Behaviors (Always on top, Hide when active)
+    move_control(
+        state.always_on_top_checkbox,
+        margin,
+        scale(196, s),
+        content_width,
+        scale(22, s),
+    );
+    move_control(
+        state.hide_when_active_checkbox,
+        margin,
+        scale(220, s),
+        content_width,
+        scale(22, s),
+    );
+
+    // Auto-save notice
+    if let Some(note) = state.settings_controls.last() {
+        move_control(*note, margin, scale(250, s), content_width, scale(18, s));
     }
 }

@@ -1,5 +1,6 @@
 use crate::core::CoreError;
 use crate::gui::{Preferences, Theme, scale};
+use crate::input::ClickButton;
 use crate::matching::{
     DEFAULT_CLICK_DELAY_MS, DEFAULT_MATCH_THREADS, MATCH_THREAD_OPTIONS, MAX_CLICK_DELAY_MS,
     MIN_CLICK_DELAY_MS, PreparedTemplate, bgra_to_gray, default_click_delay_ms,
@@ -300,11 +301,22 @@ fn old_preferences_use_default_click_delay_and_theme() {
     assert_eq!(preferences.click_delay_ms, default_click_delay_ms());
     assert_eq!(preferences.match_threads, DEFAULT_MATCH_THREADS);
     assert_eq!(preferences.theme, Theme::Dark);
-    assert_eq!(preferences.image_count, 10);
+    assert_eq!(preferences.image_count, 3);
     assert!(preferences.always_on_top);
+    assert_eq!(preferences.start_hotkey, 0x70);
+    assert_eq!(preferences.stop_hotkey, 0x71);
+    assert_eq!(preferences.close_hotkey, 0x72);
+    assert!(!preferences.hide_when_active);
     let defaults = Preferences::default();
     assert_eq!(defaults.click_delay_ms, DEFAULT_CLICK_DELAY_MS);
     assert_eq!(defaults.match_threads, DEFAULT_MATCH_THREADS);
+    assert_eq!(defaults.image_count, 3);
+    assert_eq!(defaults.classical_delay_ms, 50);
+    assert_eq!(defaults.classical_button, ClickButton::Left);
+    assert_eq!(defaults.start_hotkey, 0x70);
+    assert_eq!(defaults.stop_hotkey, 0x71);
+    assert_eq!(defaults.close_hotkey, 0x72);
+    assert!(!defaults.hide_when_active);
 }
 
 #[test]
@@ -316,6 +328,12 @@ fn selected_settings_round_trip_through_preferences() {
         match_threads: 8,
         theme: Theme::Purple,
         image_count: 37,
+        classical_delay_ms: 25,
+        classical_button: ClickButton::Right,
+        start_hotkey: 0x73,
+        stop_hotkey: 0x74,
+        close_hotkey: 0x75,
+        hide_when_active: true,
     };
     let encoded = serde_json::to_string(&preferences).expect("preferences serialize");
     let decoded: Preferences = serde_json::from_str(&encoded).expect("preferences deserialize");
@@ -323,7 +341,55 @@ fn selected_settings_round_trip_through_preferences() {
     assert_eq!(decoded.match_threads, 8);
     assert_eq!(decoded.theme, Theme::Purple);
     assert_eq!(decoded.image_count, 37);
+    assert_eq!(decoded.classical_delay_ms, 25);
+    assert_eq!(decoded.classical_button, ClickButton::Right);
+    assert_eq!(decoded.start_hotkey, 0x73);
+    assert_eq!(decoded.stop_hotkey, 0x74);
+    assert_eq!(decoded.close_hotkey, 0x75);
+    assert!(decoded.hide_when_active);
     assert_eq!(decoded.image_paths, preferences.image_paths);
+}
+
+#[test]
+fn vk_to_string_formats_keys() {
+    use crate::gui::preferences::vk_to_string;
+    assert_eq!(vk_to_string(0x70), "F1");
+    assert_eq!(vk_to_string(0x71), "F2");
+    assert_eq!(vk_to_string(0x72), "F3");
+    assert_eq!(vk_to_string(0x1B), "Esc");
+    assert_eq!(vk_to_string(0x20), "Space");
+}
+
+#[test]
+fn custom_hotkeys_format_labels_and_tips() {
+    use crate::gui::preferences::vk_to_string;
+    let start_str = vk_to_string(0x73);
+    let stop_str = vk_to_string(0x74);
+    let close_str = vk_to_string(0x75);
+    let menu_tip = format!("Tip: Open Classical or Images, then press {start_str} to start.");
+    let ready_text = format!("Ready  |  Press {start_str} to start, {stop_str} to stop.");
+    let stopped_text = format!("Stopped. Press {start_str} to start.");
+    let global_hotkeys = format!(
+        "Global Hotkeys:  [{start_str}] Start   •   [{stop_str}] Stop   •   [{close_str}] Close"
+    );
+
+    assert_eq!(
+        menu_tip,
+        "Tip: Open Classical or Images, then press F4 to start."
+    );
+    assert_eq!(ready_text, "Ready  |  Press F4 to start, F5 to stop.");
+    assert_eq!(stopped_text, "Stopped. Press F4 to start.");
+    assert_eq!(
+        global_hotkeys,
+        "Global Hotkeys:  [F4] Start   •   [F5] Stop   •   [F6] Close"
+    );
+}
+
+#[test]
+fn classical_click_button_names() {
+    assert_eq!(ClickButton::Left.name(), "Left Click");
+    assert_eq!(ClickButton::Right.name(), "Right Click");
+    assert_eq!(ClickButton::Middle.name(), "Middle Click");
 }
 
 #[test]

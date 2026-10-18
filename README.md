@@ -2,19 +2,20 @@
 
 # RustyClicker  <img alt="GitHub code size in bytes" src="https://img.shields.io/github/languages/code-size/V037/RustyClicker"> ![Lines of Code](./output/badge.svg)
 
-**Version:** v1.3.0 (Experimental)
+**Version:** v1.3.1 (Stable)
 
-RustyClicker is a lightweight Windows autoclicker written in Rust. It watches
-the screen for selected image targets and clicks the center of a target when it
-finds one.
+RustyClicker is a lightweight Windows autoclicker written in Rust. It provides both
+an ultra-fast **Classical Autoclicker** (direct hardware mouse clicking at current cursor position)
+and an intelligent **Image Autoclicker** that watches the screen for image targets and clicks them.
 
 ## Features
 
-- Match image targets against the screen using grayscale zero-mean normalized
-  cross-correlation (ZNCC).
+- **Classical Autoclicker**: Ultra-fast direct cursor clicking at current mouse position with configurable interval (down to 0 ms / uncapped), configurable mouse button (Left, Right, Middle), and live CPS/click metrics.
+- **Image Autoclicker**: Matches image targets against the screen using grayscale zero-mean normalized cross-correlation (ZNCC).
 - High-performance screen capture: GPU-accelerated DirectX 11 / DXGI Desktop Duplication with sub-millisecond texture staging and automatic fallback to GDI BitBlt.
-- Configure between 1 and 99 image slots, and advance to the next configured
-  target after a click.
+- Interactive hotkey remapping in Settings with single-keypress capture (defaults: F1 Start, F2 Stop, F3 Close).
+- Stealth mode ("Hide when active") to hide the application window while either autoclicker is running.
+- Configure between 1 and 99 image slots, and advance to the next configured target after a click.
 - Design complex automation routines using the built-in **Behavior Tree Logic Builder** (visual tree editor with JSON export/import).
 - Set the click interval to any integer from 1 to 10,000 ms (default: 100 ms).
 - Choose 1, 2, 4, or 8 Rayon threads for image matching (default: 2).

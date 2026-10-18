@@ -2,6 +2,12 @@ use super::{
     DEFAULT_IMAGE_COUNT, IMAGE_BITMAP, MAX_IMAGE_COUNT, WINDOW_TITLE, gdi::OwnedGdiObject,
     layout::layout_controls, preferences::Theme,
 };
+use crate::classical_worker::{ClassicalWorkerState, run_classical_clicker};
+use crate::gui::preferences::{
+    DEFAULT_CLASSICAL_DELAY_MS, DEFAULT_CLOSE_HOTKEY, DEFAULT_START_HOTKEY, DEFAULT_STOP_HOTKEY,
+    vk_to_string,
+};
+use crate::input::ClickButton;
 use crate::matching::{DEFAULT_MATCH_THREADS, PreparedTemplate, default_click_delay_ms};
 use crate::worker::{WorkerState, run_clicker};
 use image::ImageReader;
@@ -42,6 +48,7 @@ use windows::{
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ActivePanel {
     MainMenu,
+    Classical,
     Clicker,
     Logic,
     Settings,
@@ -54,7 +61,25 @@ pub(crate) struct AppState {
     pub(crate) clicker_controls: Vec<HWND>,
     pub(crate) menu_controls: Vec<HWND>,
     pub(crate) settings_controls: Vec<HWND>,
+    pub(crate) classical_controls: Vec<HWND>,
     pub(crate) clicker_button: HWND,
+    pub(crate) classical_nav_button: HWND,
+    pub(crate) images_button: HWND,
+    pub(crate) classical_title: HWND,
+    pub(crate) classical_subtitle: HWND,
+    pub(crate) classical_delay_label: HWND,
+    pub(crate) classical_delay_input: HWND,
+    pub(crate) classical_button_label: HWND,
+    pub(crate) classical_button_combo: HWND,
+    pub(crate) classical_status_label: HWND,
+    pub(crate) classical_stats_label: HWND,
+    pub(crate) classical_start_button: HWND,
+    pub(crate) classical_stop_button: HWND,
+    pub(crate) classical_close_button: HWND,
+    pub(crate) classical_always_on_top_checkbox: HWND,
+    pub(crate) classical_delay_ms: u64,
+    pub(crate) classical_button: ClickButton,
+    pub(crate) classical_worker: Option<Arc<ClassicalWorkerState>>,
     pub(crate) menu_status_title: HWND,
     pub(crate) menu_summary_label: HWND,
     pub(crate) menu_hotkey_label: HWND,
@@ -80,9 +105,22 @@ pub(crate) struct AppState {
     pub(crate) version_label: HWND,
     pub(crate) click_delay_input: HWND,
     pub(crate) theme_combo: HWND,
-    pub(crate) slot_count_combo: HWND,
+    pub(crate) slot_count_input: HWND,
     pub(crate) thread_count_combo: HWND,
     pub(crate) settings_open: bool,
+    pub(crate) start_hotkey: u32,
+    pub(crate) stop_hotkey: u32,
+    pub(crate) close_hotkey: u32,
+    pub(crate) hide_when_active: bool,
+    pub(crate) start_hotkey_input: HWND,
+    pub(crate) stop_hotkey_input: HWND,
+    pub(crate) close_hotkey_input: HWND,
+    pub(crate) hide_when_active_checkbox: HWND,
+    pub(crate) settings_heading: HWND,
+    pub(crate) start_hotkey_label: HWND,
+    pub(crate) stop_hotkey_label: HWND,
+    pub(crate) close_hotkey_label: HWND,
+    pub(crate) hotkey_instruction: HWND,
     pub(crate) logic_controls: Vec<HWND>,
     pub(crate) logic_button: HWND,
     pub(crate) logic_tree_title: HWND,
@@ -137,9 +175,27 @@ impl AppState {
             paths: std::array::from_fn(|_| None),
             image_count: DEFAULT_IMAGE_COUNT,
             clicker_controls: Vec::with_capacity(16),
-            menu_controls: Vec::with_capacity(10),
-            settings_controls: Vec::with_capacity(8),
+            menu_controls: Vec::with_capacity(12),
+            settings_controls: Vec::with_capacity(9),
+            classical_controls: Vec::with_capacity(12),
             clicker_button: HWND::default(),
+            classical_nav_button: HWND::default(),
+            images_button: HWND::default(),
+            classical_title: HWND::default(),
+            classical_subtitle: HWND::default(),
+            classical_delay_label: HWND::default(),
+            classical_delay_input: HWND::default(),
+            classical_button_label: HWND::default(),
+            classical_button_combo: HWND::default(),
+            classical_status_label: HWND::default(),
+            classical_stats_label: HWND::default(),
+            classical_start_button: HWND::default(),
+            classical_stop_button: HWND::default(),
+            classical_close_button: HWND::default(),
+            classical_always_on_top_checkbox: HWND::default(),
+            classical_delay_ms: DEFAULT_CLASSICAL_DELAY_MS,
+            classical_button: ClickButton::default(),
+            classical_worker: None,
             menu_status_title: HWND::default(),
             menu_summary_label: HWND::default(),
             menu_hotkey_label: HWND::default(),
@@ -165,9 +221,22 @@ impl AppState {
             version_label: HWND::default(),
             click_delay_input: HWND::default(),
             theme_combo: HWND::default(),
-            slot_count_combo: HWND::default(),
+            slot_count_input: HWND::default(),
             thread_count_combo: HWND::default(),
             settings_open: false,
+            start_hotkey: DEFAULT_START_HOTKEY,
+            stop_hotkey: DEFAULT_STOP_HOTKEY,
+            close_hotkey: DEFAULT_CLOSE_HOTKEY,
+            hide_when_active: false,
+            start_hotkey_input: HWND::default(),
+            stop_hotkey_input: HWND::default(),
+            close_hotkey_input: HWND::default(),
+            hide_when_active_checkbox: HWND::default(),
+            settings_heading: HWND::default(),
+            start_hotkey_label: HWND::default(),
+            stop_hotkey_label: HWND::default(),
+            close_hotkey_label: HWND::default(),
+            hotkey_instruction: HWND::default(),
             logic_controls: Vec::with_capacity(20),
             logic_button: HWND::default(),
             logic_tree_title: HWND::default(),
@@ -265,6 +334,11 @@ impl AppState {
         } else {
             SW_HIDE
         };
+        let show_classical = if panel == ActivePanel::Classical {
+            SW_SHOW
+        } else {
+            SW_HIDE
+        };
         let show_clicker = if panel == ActivePanel::Clicker {
             SW_SHOW
         } else {
@@ -285,6 +359,9 @@ impl AppState {
             for control in &self.menu_controls {
                 let _ = ShowWindow(*control, show_menu);
             }
+            for control in &self.classical_controls {
+                let _ = ShowWindow(*control, show_classical);
+            }
             for control in &self.clicker_controls {
                 let _ = ShowWindow(*control, show_clicker);
             }
@@ -294,66 +371,69 @@ impl AppState {
             for control in &self.settings_controls {
                 let _ = ShowWindow(*control, show_settings);
             }
-
-            match panel {
-                ActivePanel::MainMenu => {
-                    let _ = ShowWindow(self.clicker_button, SW_SHOW);
-                    let _ = ShowWindow(self.logic_button, SW_SHOW);
-                    let _ = ShowWindow(self.settings_button, SW_SHOW);
-                }
-                ActivePanel::Clicker => {
-                    let _ = ShowWindow(self.clicker_button, SW_SHOW);
-                    let _ = ShowWindow(self.logic_button, SW_HIDE);
-                    let _ = ShowWindow(self.settings_button, SW_HIDE);
-                }
-                ActivePanel::Logic => {
-                    let _ = ShowWindow(self.clicker_button, SW_HIDE);
-                    let _ = ShowWindow(self.logic_button, SW_SHOW);
-                    let _ = ShowWindow(self.settings_button, SW_HIDE);
-                }
-                ActivePanel::Settings => {
-                    let _ = ShowWindow(self.clicker_button, SW_HIDE);
-                    let _ = ShowWindow(self.logic_button, SW_HIDE);
-                    let _ = ShowWindow(self.settings_button, SW_SHOW);
-                }
-            }
+            let _ = ShowWindow(self.settings_button, SW_SHOW);
         }
 
         set_text(
             self.main_heading,
             match panel {
                 ActivePanel::MainMenu => "RustyClicker",
-                ActivePanel::Clicker => "Image Clicker",
+                ActivePanel::Classical => "Classical Clicker",
+                ActivePanel::Clicker => "Images Clicker",
                 ActivePanel::Logic => "Logic Builder",
                 ActivePanel::Settings => "Settings",
             },
         );
         set_text(
-            self.clicker_button,
-            if panel == ActivePanel::Clicker {
-                "Back"
-            } else {
-                "Clicker"
-            },
-        );
-        set_text(
-            self.logic_button,
-            if panel == ActivePanel::Logic {
-                "Back"
-            } else {
-                "Logic"
-            },
-        );
-        set_text(
             self.settings_button,
-            if panel == ActivePanel::Settings {
-                "Back"
+            if panel == ActivePanel::MainMenu {
+                "⚙"
             } else {
-                "Settings"
+                "← Back"
             },
         );
 
         self.update_menu_summary();
+        let start_str = vk_to_string(self.start_hotkey);
+        let stop_str = vk_to_string(self.stop_hotkey);
+
+        if panel == ActivePanel::MainMenu {
+            set_text(
+                self.menu_tips_label,
+                &format!("Tip: Open Classical or Images, then press {start_str} to start."),
+            );
+        } else if panel == ActivePanel::Classical {
+            let classical_running = self
+                .classical_worker
+                .as_ref()
+                .is_some_and(|w| w.is_running());
+            if !classical_running {
+                set_text(
+                    self.classical_status_label,
+                    &format!("Ready  |  Press {start_str} to start, {stop_str} to stop."),
+                );
+            }
+        } else if panel == ActivePanel::Clicker {
+            let images_running = self
+                .worker
+                .as_ref()
+                .is_some_and(|w| w.running.load(Ordering::Acquire));
+            if !images_running {
+                let has_images = self.paths[..self.image_count].iter().any(|p| p.is_some());
+                if has_images {
+                    set_text(
+                        self.status_label,
+                        &format!("Ready  |  Press {start_str} to start, {stop_str} to stop."),
+                    );
+                } else {
+                    set_text(
+                        self.status_label,
+                        &format!("Ready  |  Select target image, then press {start_str} to start."),
+                    );
+                }
+            }
+        }
+
         layout_controls(window, self);
 
         if panel == ActivePanel::Clicker {
@@ -373,27 +453,109 @@ impl AppState {
             .iter()
             .filter(|p| p.is_some())
             .count();
-        let is_running = self
+        let is_image_running = self
             .worker
             .as_ref()
             .is_some_and(|w| w.running.load(Ordering::Acquire));
-        let summary = if is_running {
+        let is_classical_running = self
+            .classical_worker
+            .as_ref()
+            .is_some_and(|w| w.running.load(Ordering::Acquire));
+        let summary = if is_classical_running {
+            if let Some(worker) = &self.classical_worker {
+                let clicks = worker.clicks.load(Ordering::Relaxed);
+                let cps = worker.cps.load(Ordering::Relaxed);
+                format!(
+                    "Classical: RUNNING • {clicks} clicks • {cps} CPS • {}",
+                    self.classical_button.name()
+                )
+            } else {
+                "Classical: RUNNING".to_owned()
+            }
+        } else if is_image_running {
             if let Some(worker) = &self.worker {
                 let clicks = worker.clicks.load(Ordering::Relaxed);
                 let scan_ms = worker.scan_duration_us.load(Ordering::Relaxed) as f64 / 1_000.0;
-                format!("Status: RUNNING • {clicks} clicks • Scan: {scan_ms:.2} ms")
+                format!("Images: RUNNING • {clicks} clicks • Scan: {scan_ms:.2} ms")
             } else {
-                "Status: RUNNING".to_owned()
+                "Images: RUNNING".to_owned()
             }
         } else {
+            let delay_str = if self.classical_delay_ms == 0 {
+                "uncapped".to_owned()
+            } else {
+                format!("{}ms", self.classical_delay_ms)
+            };
             format!(
-                "Targets: {loaded_targets}/{count} configured  •  Interval: {delay} ms  •  Threads: {threads}",
+                "Classical: {} ({delay_str})  •  Images: {loaded_targets}/{count} ready",
+                self.classical_button.name(),
                 count = self.image_count,
-                delay = self.click_delay_ms,
-                threads = self.match_threads
             )
         };
         set_text(self.menu_summary_label, &summary);
+    }
+
+    pub(crate) fn set_classical_delay(&mut self, delay: u64) {
+        let delay = delay.min(10000);
+        self.classical_delay_ms = delay;
+        if let Some(worker) = &self.classical_worker {
+            worker.delay_ms.store(delay, Ordering::Relaxed);
+        }
+        set_text(self.classical_delay_input, &delay.to_string());
+        self.update_menu_summary();
+        self.save_preferences();
+    }
+
+    pub(crate) fn set_classical_button(&mut self, button: ClickButton) {
+        self.classical_button = button;
+        if let Some(worker) = &self.classical_worker {
+            worker.button.store(button as u8, Ordering::Relaxed);
+        }
+        self.update_menu_summary();
+        self.save_preferences();
+    }
+
+    pub(crate) fn start_classical(&mut self, window: HWND) {
+        if let Some(worker) = &self.classical_worker
+            && worker.running.load(Ordering::Acquire)
+        {
+            return;
+        }
+
+        if let Some(worker) = self.worker.take() {
+            worker.stop.store(true, Ordering::Release);
+        }
+
+        self.set_always_on_top(window, true);
+        if self.hide_when_active {
+            unsafe {
+                let _ = ShowWindow(window, SW_HIDE);
+            }
+        }
+        let worker = Arc::new(ClassicalWorkerState::new(
+            self.classical_delay_ms,
+            self.classical_button,
+        ));
+        self.classical_worker = Some(Arc::clone(&worker));
+        set_text(self.classical_status_label, "Running  |  Clicking...");
+        self.update_menu_summary();
+
+        let _ = thread::Builder::new()
+            .name("classical-clicker".to_owned())
+            .spawn(move || run_classical_clicker(worker));
+    }
+
+    pub(crate) fn stop_classical(&mut self, window: HWND) {
+        if let Some(worker) = self.classical_worker.take() {
+            worker.stop.store(true, Ordering::Release);
+        }
+        let start_str = vk_to_string(self.start_hotkey);
+        set_text(
+            self.classical_status_label,
+            &format!("Stopped. Press {start_str} to start."),
+        );
+        self.restore_window(window);
+        self.update_menu_summary();
     }
 
     pub(crate) fn set_running_ui(&mut self, window: HWND, running: bool) {
@@ -643,6 +805,18 @@ impl AppState {
         self.paths[slot] = Some(path);
         self.refresh_slot_names();
         self.update_menu_summary();
+        let images_running = self
+            .worker
+            .as_ref()
+            .is_some_and(|w| w.running.load(Ordering::Acquire));
+        if !images_running {
+            let start_str = vk_to_string(self.start_hotkey);
+            let stop_str = vk_to_string(self.stop_hotkey);
+            set_text(
+                self.status_label,
+                &format!("Ready  |  Press {start_str} to start, {stop_str} to stop."),
+            );
+        }
         if let Err(error) = self.refresh_preview(window) {
             self.show_message(&error, MB_ICONERROR);
         }
@@ -653,6 +827,26 @@ impl AppState {
         self.paths[self.selected_slot] = None;
         self.refresh_slot_names();
         self.update_menu_summary();
+        let images_running = self
+            .worker
+            .as_ref()
+            .is_some_and(|w| w.running.load(Ordering::Acquire));
+        if !images_running {
+            let start_str = vk_to_string(self.start_hotkey);
+            let stop_str = vk_to_string(self.stop_hotkey);
+            let has_images = self.paths[..self.image_count].iter().any(|p| p.is_some());
+            if has_images {
+                set_text(
+                    self.status_label,
+                    &format!("Ready  |  Press {start_str} to start, {stop_str} to stop."),
+                );
+            } else {
+                set_text(
+                    self.status_label,
+                    &format!("Ready  |  Select target image, then press {start_str} to start."),
+                );
+            }
+        }
         if let Err(error) = self.refresh_preview(window) {
             self.show_message(&error, MB_ICONERROR);
         }
@@ -710,6 +904,11 @@ impl AppState {
         }
 
         self.set_always_on_top(window, true);
+        if self.hide_when_active {
+            unsafe {
+                let _ = ShowWindow(window, SW_HIDE);
+            }
+        }
         let worker = Arc::new(WorkerState {
             stop: AtomicBool::new(false),
             running: AtomicBool::new(true),
@@ -741,16 +940,136 @@ impl AppState {
         }
     }
 
-    pub(crate) fn stop(&mut self) {
+    pub(crate) fn restore_window(&self, window: HWND) {
+        if !window.0.is_null() {
+            unsafe {
+                let _ = ShowWindow(window, SW_SHOW);
+                let _ = windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow(window);
+            }
+        }
+    }
+
+    pub(crate) fn stop(&mut self, window: HWND) {
+        let start_str = vk_to_string(self.start_hotkey);
         if let Some(worker) = &self.worker
             && worker.running.load(Ordering::Acquire)
         {
             worker.stop.store(true, Ordering::Release);
             set_text(self.status_label, "Stopping...");
         } else {
-            set_text(self.status_label, "Stopped.");
+            set_text(
+                self.status_label,
+                &format!("Stopped. Press {start_str} to start."),
+            );
         }
+        self.stop_classical(window);
+        self.restore_window(window);
         self.update_menu_summary();
+    }
+
+    pub(crate) fn set_hide_when_active(&mut self, enabled: bool) {
+        self.hide_when_active = enabled;
+        if !self.hide_when_active_checkbox.0.is_null() {
+            unsafe {
+                let _ = SendMessageW(
+                    self.hide_when_active_checkbox,
+                    BM_SETCHECK,
+                    Some(WPARAM(if enabled { BST_CHECKED.0 as usize } else { 0 })),
+                    Some(LPARAM(0)),
+                );
+            }
+        }
+        self.save_preferences();
+    }
+
+    pub(crate) fn update_hotkey_labels(&mut self) {
+        let start_str = vk_to_string(self.start_hotkey);
+        let stop_str = vk_to_string(self.stop_hotkey);
+        let close_str = vk_to_string(self.close_hotkey);
+
+        set_text(self.start_button, &format!("{start_str} - Start"));
+        set_text(self.stop_button, &format!("{stop_str} - Stop"));
+        set_text(self.close_button, &format!("{close_str} - Close"));
+
+        set_text(self.classical_start_button, &format!("{start_str} - Start"));
+        set_text(self.classical_stop_button, &format!("{stop_str} - Stop"));
+        set_text(self.classical_close_button, &format!("{close_str} - Close"));
+
+        set_text(self.start_hotkey_input, &start_str);
+        set_text(self.stop_hotkey_input, &stop_str);
+        set_text(self.close_hotkey_input, &close_str);
+
+        set_text(
+            self.menu_hotkey_label,
+            &format!(
+                "Global Hotkeys:  [{start_str}] Start   •   [{stop_str}] Stop   •   [{close_str}] Close"
+            ),
+        );
+        set_text(
+            self.menu_tips_label,
+            &format!("Tip: Open Classical or Images, then press {start_str} to start."),
+        );
+
+        let classical_running = self
+            .classical_worker
+            .as_ref()
+            .is_some_and(|w| w.is_running());
+        if !classical_running {
+            set_text(
+                self.classical_status_label,
+                &format!("Ready  |  Press {start_str} to start, {stop_str} to stop."),
+            );
+        }
+
+        let images_running = self
+            .worker
+            .as_ref()
+            .is_some_and(|w| w.running.load(Ordering::Acquire));
+        if !images_running {
+            let has_images = self.paths[..self.image_count].iter().any(|p| p.is_some());
+            if has_images {
+                set_text(
+                    self.status_label,
+                    &format!("Ready  |  Press {start_str} to start, {stop_str} to stop."),
+                );
+            } else {
+                set_text(
+                    self.status_label,
+                    &format!("Ready  |  Select target image, then press {start_str} to start."),
+                );
+            }
+        }
+    }
+
+    pub(crate) fn set_hotkey(&mut self, window: HWND, id: i32, vk: u32) {
+        let _ = unsafe {
+            windows::Win32::UI::Input::KeyboardAndMouse::UnregisterHotKey(Some(window), id)
+        };
+        let reg = unsafe {
+            windows::Win32::UI::Input::KeyboardAndMouse::RegisterHotKey(
+                Some(window),
+                id,
+                windows::Win32::UI::Input::KeyboardAndMouse::MOD_NOREPEAT,
+                vk,
+            )
+        };
+        match id {
+            1 => self.start_hotkey = vk,
+            2 => self.stop_hotkey = vk,
+            3 => self.close_hotkey = vk,
+            _ => {}
+        }
+        self.update_hotkey_labels();
+        self.save_preferences();
+        if reg.is_err() {
+            self.show_message(
+                &format!(
+                    "Warning: Could not register global hotkey for {}. It will work only while focused.",
+                    vk_to_string(vk)
+                ),
+                MB_ICONWARNING,
+            );
+        }
     }
 
     pub(crate) fn set_always_on_top(&mut self, window: HWND, enabled: bool) {
@@ -770,14 +1089,19 @@ impl AppState {
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
             );
         }
-        if !self.always_on_top_checkbox.0.is_null() {
-            unsafe {
-                SendMessageW(
-                    self.always_on_top_checkbox,
-                    BM_SETCHECK,
-                    Some(WPARAM(if enabled { BST_CHECKED.0 as usize } else { 0 })),
-                    Some(LPARAM(0)),
-                );
+        for checkbox in [
+            self.always_on_top_checkbox,
+            self.classical_always_on_top_checkbox,
+        ] {
+            if !checkbox.0.is_null() {
+                unsafe {
+                    SendMessageW(
+                        checkbox,
+                        BM_SETCHECK,
+                        Some(WPARAM(if enabled { BST_CHECKED.0 as usize } else { 0 })),
+                        Some(LPARAM(0)),
+                    );
+                }
             }
         }
         self.save_preferences();
@@ -785,6 +1109,9 @@ impl AppState {
 }
 
 pub(crate) fn set_text(window: HWND, text: &str) {
+    if window.0.is_null() {
+        return;
+    }
     let text: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
     unsafe {
         let _ = SetWindowTextW(window, PCWSTR(text.as_ptr()));
