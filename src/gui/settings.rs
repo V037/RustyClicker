@@ -1,13 +1,29 @@
-use super::*;
-use serde::{Deserialize, Serialize};
-use windows::Win32::Graphics::Gdi::{CreateSolidBrush, InvalidateRect};
+use super::{
+    ID_CLEAR_IMAGE, ID_CLOSE, ID_SETTINGS, ID_START, MAX_IMAGE_COUNT,
+    gdi::OwnedGdiObject,
+    layout::layout_controls,
+    preferences::{Theme, darken, rgb},
+    state::{AppState, set_text},
+};
+use crate::matching::{MATCH_THREAD_OPTIONS, MAX_CLICK_DELAY_MS, MIN_CLICK_DELAY_MS};
+use std::sync::atomic::Ordering;
+use windows::Win32::{
+    Foundation::{COLORREF, HWND, LPARAM, WPARAM},
+    Graphics::{
+        Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute},
+        Gdi::{CreateSolidBrush, HBRUSH, InvalidateRect},
+    },
+    UI::WindowsAndMessaging::{
+        CB_SETCURSEL, MB_ICONERROR, MB_ICONWARNING, SW_HIDE, SW_SHOW, SendMessageW, ShowWindow,
+    },
+};
 
-pub(super) const DEFAULT_IMAGE_COUNT: usize = 10;
-pub(super) const ID_SETTINGS_DELAY_LABEL: usize = 300;
-pub(super) const ID_SETTINGS_THEME_LABEL: usize = 301;
-pub(super) const ID_SETTINGS_SLOT_COUNT_LABEL: usize = 305;
-pub(super) const ID_SETTINGS_THREADS_LABEL: usize = 309;
-pub(super) const THEMES: [Theme; 5] = [
+pub(crate) const DEFAULT_IMAGE_COUNT: usize = 10;
+pub(crate) const ID_SETTINGS_DELAY_LABEL: usize = 300;
+pub(crate) const ID_SETTINGS_THEME_LABEL: usize = 301;
+pub(crate) const ID_SETTINGS_SLOT_COUNT_LABEL: usize = 305;
+pub(crate) const ID_SETTINGS_THREADS_LABEL: usize = 309;
+pub(crate) const THEMES: [Theme; 5] = [
     Theme::Light,
     Theme::Dark,
     Theme::Blue,
@@ -15,67 +31,8 @@ pub(super) const THEMES: [Theme; 5] = [
     Theme::Purple,
 ];
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum Theme {
-    Light,
-    #[default]
-    Dark,
-    Blue,
-    Green,
-    Purple,
-}
-
-#[derive(Serialize, Deserialize)]
-pub(crate) struct Preferences {
-    #[serde(default)]
-    pub(crate) image_paths: Vec<Option<String>>,
-    #[serde(default)]
-    pub(crate) always_on_top: bool,
-    #[serde(default = "default_click_delay_ms")]
-    pub(crate) click_delay_ms: u64,
-    #[serde(default = "default_match_threads")]
-    pub(crate) match_threads: usize,
-    #[serde(default)]
-    pub(crate) theme: Theme,
-    #[serde(default = "default_image_count")]
-    pub(crate) image_count: usize,
-}
-
-impl Default for Preferences {
-    fn default() -> Self {
-        Self {
-            image_paths: Vec::new(),
-            always_on_top: false,
-            click_delay_ms: default_click_delay_ms(),
-            match_threads: default_match_threads(),
-            theme: Theme::default(),
-            image_count: default_image_count(),
-        }
-    }
-}
-
-const fn default_image_count() -> usize {
-    DEFAULT_IMAGE_COUNT
-}
-
-const fn default_match_threads() -> usize {
-    DEFAULT_MATCH_THREADS
-}
-
-const fn rgb(red: u8, green: u8, blue: u8) -> u32 {
-    red as u32 | (green as u32) << 8 | (blue as u32) << 16
-}
-
-const fn darken(color: u32) -> u32 {
-    let red = (color & 0xff) * 3 / 4;
-    let green = ((color >> 8) & 0xff) * 3 / 4;
-    let blue = ((color >> 16) & 0xff) * 3 / 4;
-    red | green << 8 | blue << 16
-}
-
 impl Theme {
-    pub(super) fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Light => "Light",
             Self::Dark => "Dark",
@@ -85,7 +42,7 @@ impl Theme {
         }
     }
 
-    pub(super) fn colors(self) -> (COLORREF, COLORREF) {
+    pub(crate) fn colors(self) -> (COLORREF, COLORREF) {
         let (background, text) = match self {
             Self::Light => (rgb(248, 250, 252), rgb(30, 41, 59)),
             Self::Dark => (rgb(17, 24, 39), rgb(229, 231, 235)),
@@ -96,7 +53,7 @@ impl Theme {
         (COLORREF(background), COLORREF(text))
     }
 
-    pub(super) fn button_colors(self, id: usize, selected: bool) -> (u32, u32, u32) {
+    pub(crate) fn button_colors(self, id: usize, selected: bool) -> (u32, u32, u32) {
         let (_, text) = self.colors();
         let accent = self.accent();
         let surface = self.surface_color();
@@ -143,7 +100,7 @@ impl Theme {
         )
     }
 
-    pub(super) fn accent(self) -> u32 {
+    pub(crate) fn accent(self) -> u32 {
         match self {
             Self::Light => rgb(37, 99, 235),
             Self::Dark => rgb(0, 230, 170),
@@ -153,16 +110,16 @@ impl Theme {
         }
     }
 
-    pub(super) fn brush(self) -> OwnedGdiObject<HBRUSH> {
+    pub(crate) fn brush(self) -> OwnedGdiObject<HBRUSH> {
         let (background, _) = self.colors();
         OwnedGdiObject::new(unsafe { CreateSolidBrush(background) })
     }
 
-    pub(super) fn surface_brush(self) -> OwnedGdiObject<HBRUSH> {
+    pub(crate) fn surface_brush(self) -> OwnedGdiObject<HBRUSH> {
         OwnedGdiObject::new(unsafe { CreateSolidBrush(COLORREF(self.surface_color())) })
     }
 
-    pub(super) fn surface_color(self) -> u32 {
+    pub(crate) fn surface_color(self) -> u32 {
         match self {
             Self::Light => rgb(255, 255, 255),
             Self::Dark => rgb(31, 41, 55),
@@ -175,7 +132,7 @@ impl Theme {
 
 /// Owns settings-page interactions and applies persisted setting changes to the running UI.
 impl AppState {
-    pub(super) fn set_settings_open(&mut self, window: HWND, open: bool) {
+    pub(crate) fn set_settings_open(&mut self, window: HWND, open: bool) {
         self.settings_open = open;
         let visibility = if open { SW_HIDE } else { SW_SHOW };
         let settings_visibility = if open { SW_SHOW } else { SW_HIDE };
@@ -195,7 +152,7 @@ impl AppState {
         }
     }
 
-    pub(super) fn set_click_delay(&mut self, delay: u64) {
+    pub(crate) fn set_click_delay(&mut self, delay: u64) {
         if !(MIN_CLICK_DELAY_MS..=MAX_CLICK_DELAY_MS).contains(&delay) {
             set_text(self.click_delay_input, &self.click_delay_ms.to_string());
             self.show_message(
@@ -212,7 +169,7 @@ impl AppState {
         self.save_preferences();
     }
 
-    pub(super) fn set_match_threads(&mut self, selection: usize) {
+    pub(crate) fn set_match_threads(&mut self, selection: usize) {
         let Some(threads) = MATCH_THREAD_OPTIONS.get(selection).copied() else {
             self.show_message("Select a valid matching thread count.", MB_ICONWARNING);
             return;
@@ -224,7 +181,7 @@ impl AppState {
         self.save_preferences();
     }
 
-    pub(super) fn set_image_count(&mut self, window: HWND, count: usize) {
+    pub(crate) fn set_image_count(&mut self, window: HWND, count: usize) {
         if !(1..=MAX_IMAGE_COUNT).contains(&count) {
             self.show_message("Choose between 1 and 99 image slots.", MB_ICONWARNING);
             return;
@@ -248,7 +205,7 @@ impl AppState {
         self.save_preferences();
     }
 
-    pub(super) fn set_theme(&mut self, window: HWND, selection: usize) {
+    pub(crate) fn set_theme(&mut self, window: HWND, selection: usize) {
         let Some(theme) = THEMES.get(selection).copied() else {
             self.show_message("Select a valid window color.", MB_ICONWARNING);
             return;

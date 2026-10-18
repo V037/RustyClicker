@@ -8,8 +8,8 @@ before acting: release details and working-tree state can change.
 
 - Repository: `V037/RustyClicker`
 - Main development branch: `rust_impl`
-- Last verified release at handoff creation: **v1.2.0**
-- Release tag: `v1.2.0`
+- Last verified release: **v1.2.1**
+- Release tag: `v1.2.1`
 - Release commit: `1eae53d`
 - GitHub release: <https://github.com/V037/RustyClicker/releases/tag/v1.2.0>
 - The workspace was clean at handoff creation.
@@ -25,12 +25,13 @@ statistics.
 ## Architecture and important implementation details
 
 - `src/main.rs`: Windows GUI subsystem entry point.
-- `src/main_gui.rs`: Win32 window, controls, layout, image previews, saved
-  preferences, and worker lifecycle.
-- `src/settings_gui.rs`: settings interactions, theme definitions, and the
-  serialized `Preferences` model.
-- `src/algorithms.rs`: template preparation, grayscale conversion, screen
-  capture, matching, worker loop, click injection, and core error types.
+- `src/core/`: error types (`CoreError`) and shared definitions.
+- `src/matching/`: template preparation, grayscale conversion, and Rayon matching pool.
+- `src/capture/`: screen capture resources and direct DIB grayscale buffer.
+- `src/input/`: Windows `SendInput` mouse click injection.
+- `src/worker.rs`: worker thread loop and interruptible sleep.
+- `src/gui/`: Win32 GUI controls, layout, GDI RAII, theme definitions, preferences persistence, and window procedures.
+- `src/tests/`: unit tests for core matching, formatting, and migrations.
 - Matching uses `corrmatch` 0.2.5 with `rayon` and `simd` features. It searches
   grayscale images with ZNCC/coarse-to-fine matching.
 - Matching thread choices are **1, 2, 4, and 8**, with **2** as the default.

@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.2.1] - 2026-10-18
+
+### Changed
+
+- Modularize the codebase by splitting monolithic files (`algorithms.rs` and
+  `main_gui.rs`) into focused modules (`core`, `matching`, `capture`, `input`,
+  `worker`, `gui`, and `tests`) for improved maintainability and reduced AI
+  context token consumption.
+- Move unit tests into a dedicated `tests` module compiled only during test runs.
+
 ## [1.2.0] - 2026-10-18
 
 ### Fixed
