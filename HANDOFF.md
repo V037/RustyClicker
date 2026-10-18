@@ -44,7 +44,7 @@ statistics, and an isolated Behavior Tree Logic Builder panel.
 - `src/tests/`:
   - `algorithms_tests.rs`: matching, grayscale conversion, DPI scaling, and release scan benchmarks.
   - `logic_tests.rs`: behavior tree JSON serialization, hierarchy integrity, and node CRUD operations.
-- Total 22 automated tests pass in release mode.
+- Total 23 automated tests pass in release mode.
 - Matching uses `corrmatch` 0.2.5 with `rayon` and `simd` features (ZNCC coarse-to-fine).
 - Matching thread choices are **1, 2, 4, and 8**, with **2** as the default.
 - Click interval accepts integer values from **1 to 10,000 ms**, default **100 ms**.
@@ -73,8 +73,8 @@ The compiled release executable is located at `target\release\RustyClicker.exe`.
 - Keep `Cargo.toml`'s package version, `Cargo.lock`, `README.md`'s version
   badge/text, and `CHANGELOG.md` in sync for a release.
 - Update the changelog with user-visible fixes and feature changes.
-- Push source changes to `rust_impl`, create a version tag such as `v1.2.1`,
-  then publish the optimized EXE as a GitHub release asset if requested.
+- Push source changes to `rust_impl`, create a version tag such as `v1.3.0`,
+  then publish the release and upload the compiled EXE as an asset.
 - The Rust executable name is `RustyClicker.exe`; the Windows app icon is
   embedded from the project assets/resource build setup.
 
@@ -93,17 +93,9 @@ The compiled release executable is located at `target\release\RustyClicker.exe`.
 
 ## Useful project history
 
-- OpenCV was replaced with the Rust-native `corrmatch` matcher.
-- v1.1 added GUI GDI RAII, `SendInput`, per-user preferences, and migration
-  from the old preference-file location.
-- v1.2 added typed core errors, configurable thread count and click interval,
-  settings-preview restoration, label styling fixes, and modularized code.
-- v1.2.1 modularized monolithic GUI into dedicated submodules (`gui/controls.rs`, `gui/layout.rs`, `gui/settings.rs`, `gui/state.rs`, `gui/wndproc.rs`, `gui/logic_gui.rs`).
-- Added Behavior Tree Logic Builder panel with Win32 `SysTreeView32`, dynamic property editor, and JSON nested tree serialization.
-- Relocated original clicker UI into a dedicated Clicker panel with seamless navigation buttons across all views.
-- Transformed main window into a clean System Overview dashboard: removed redundant middle navigation buttons and welcome header, keeping logo, title, version, and credits.
-- Top-right navigation buttons stay anchored at top right and are architected to never overlap title/version: Row 1 hosts the brand icon and width-constrained title, while Row 2 hosts the version and credits directly beneath.
-- Enabled compact window sizing (`320x330` min track size in `WM_GETMINMAXINFO`) with dynamic preview scaling.
-- On the Clicker panel, repositioned the "Always on top" checkbox directly above the three action buttons (`F1 - Start`, `F2 - Stop`, `F3 - Close`), eliminating horizontal crowding.
-- Added GPU-accelerated DirectX 11 / DXGI Desktop Duplication capture engine (`dxgi.rs`) with sub-millisecond texture staging, multi-monitor display prioritization, and seamless automatic GDI `BitBlt` fallback.
-- Legacy `opencv_version` branch was purged from GitHub.
+- **v1.0**: Initial Rust implementation replacing legacy OpenCV with the native `corrmatch` ZNCC matcher.
+- **v1.1**: Added GDI RAII resource management, Windows `SendInput`, per-user preferences, and auto-migration from older preference paths.
+- **v1.2**: Added typed core errors, configurable Rayon matching thread count (1–8) and click delay (1–10,000 ms), settings-preview restoration, and label styling fixes.
+- **v1.2.1**: Modularized monolithic GUI into dedicated submodules (`controls.rs`, `layout.rs`, `settings.rs`, `state.rs`, `wndproc.rs`, `logic_gui.rs`) and added the Behavior Tree Logic Builder panel (`SysTreeView32`, dynamic property editor, JSON export/import).
+- **v1.2.2 (Beta)**: Relocated clicker controls into a dedicated panel, transformed main menu into a System Overview dashboard, non-overlapping header layout, compact window resizing (320×330), always-on-top button relocation, and adoption of PolyForm Noncommercial License 1.0.0.
+- **v1.3.0 (Experimental)**: Added GPU-accelerated DirectX 11 / DXGI Desktop Duplication capture engine (`dxgi.rs`) with sub-millisecond texture staging, automatic multi-monitor display prioritization, seamless GDI `BitBlt` fallback, and graceful `NoCandidates` scanner loop handling.
