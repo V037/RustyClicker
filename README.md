@@ -12,6 +12,7 @@ finds one.
 
 - Match image targets against the screen using grayscale zero-mean normalized
   cross-correlation (ZNCC).
+- High-performance screen capture: GPU-accelerated DirectX 11 / DXGI Desktop Duplication with sub-millisecond texture staging and automatic fallback to GDI BitBlt.
 - Configure between 1 and 99 image slots, and advance to the next configured
   target after a click.
 - Design complex automation routines using the built-in **Behavior Tree Logic Builder** (visual tree editor with JSON export/import).

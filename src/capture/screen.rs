@@ -1,3 +1,4 @@
+use super::dxgi::DxgiCapture;
 use crate::core::CoreError;
 use crate::matching::bgra_to_gray;
 use windows::Win32::{
@@ -12,7 +13,12 @@ use windows::Win32::{
     },
 };
 
-pub(crate) struct ScreenCapture {
+pub(crate) enum ScreenCapture {
+    Dxgi(DxgiCapture),
+    Gdi(GdiCapture),
+}
+
+pub(crate) struct GdiCapture {
     screen_dc: HDC,
     memory_dc: HDC,
     bitmap: HBITMAP,
@@ -22,7 +28,7 @@ pub(crate) struct ScreenCapture {
     height: i32,
 }
 
-impl ScreenCapture {
+impl GdiCapture {
     pub(crate) fn new(width: i32, height: i32) -> Result<Self, CoreError> {
         usize::try_from(width)
             .ok()
@@ -100,9 +106,40 @@ impl ScreenCapture {
             })
         }
     }
+
+    pub(crate) fn capture(
+        &mut self,
+        gray: &mut Vec<u8>,
+        origin_x: i32,
+        origin_y: i32,
+        width: i32,
+        height: i32,
+    ) -> Result<(u32, u32, i32, i32), CoreError> {
+        unsafe {
+            BitBlt(
+                self.memory_dc,
+                0,
+                0,
+                width,
+                height,
+                Some(self.screen_dc),
+                origin_x,
+                origin_y,
+                SRCCOPY | CAPTUREBLT,
+            )
+            .map_err(|error| CoreError::CapturePixels(error.to_string()))?;
+            let pixel_bytes = (width as usize)
+                .checked_mul(height as usize)
+                .and_then(|pixels| pixels.checked_mul(4))
+                .ok_or(CoreError::DimensionsTooLarge("Screenshot"))?;
+            let bgra = std::slice::from_raw_parts(self.pixels, pixel_bytes);
+            bgra_to_gray(bgra, width as u32, height as u32, gray)?;
+        }
+        Ok((width as u32, height as u32, origin_x, origin_y))
+    }
 }
 
-impl Drop for ScreenCapture {
+impl Drop for GdiCapture {
     fn drop(&mut self) {
         unsafe {
             let _ = SelectObject(self.memory_dc, self.previous_bitmap);
@@ -113,44 +150,67 @@ impl Drop for ScreenCapture {
     }
 }
 
-/// Reuses a top-down DIB so capture needs only BitBlt and a direct grayscale conversion.
+/// Captures the screen via GPU-accelerated DXGI Desktop Duplication,
+/// falling back seamlessly to GdiCapture if hardware duplication is unavailable or lost.
 pub(crate) fn capture_screen(
     capture: &mut Option<ScreenCapture>,
     gray: &mut Vec<u8>,
 ) -> Result<(u32, u32, i32, i32), CoreError> {
-    let origin_x = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
-    let origin_y = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
-    let width = unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) };
-    let height = unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) };
-    if width <= 0 || height <= 0 {
-        return Err(CoreError::CaptureScreenSize);
+    if capture.is_none() {
+        // Try GPU-accelerated DXGI first
+        match DxgiCapture::new() {
+            Ok(dxgi) => {
+                *capture = Some(ScreenCapture::Dxgi(dxgi));
+            }
+            Err(_) => {
+                let width = unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) };
+                let height = unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) };
+                if width <= 0 || height <= 0 {
+                    return Err(CoreError::CaptureScreenSize);
+                }
+                *capture = Some(ScreenCapture::Gdi(GdiCapture::new(width, height)?));
+            }
+        }
     }
-    if capture
-        .as_ref()
-        .is_none_or(|capture| capture.width != width || capture.height != height)
-    {
-        *capture = Some(ScreenCapture::new(width, height)?);
+
+    match capture.as_mut() {
+        Some(ScreenCapture::Dxgi(dxgi)) => match dxgi.capture(gray) {
+            Ok(res) => Ok(res),
+            Err(_) => {
+                // If DXGI fails (e.g. resolution change or UAC prompt), try re-creating DXGI once
+                if let Ok(mut new_dxgi) = DxgiCapture::new() {
+                    if let Ok(res) = new_dxgi.capture(gray) {
+                        *dxgi = new_dxgi;
+                        return Ok(res);
+                    }
+                }
+                // Fall back seamlessly to GDI
+                let origin_x = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
+                let origin_y = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
+                let width = unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) };
+                let height = unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) };
+                if width <= 0 || height <= 0 {
+                    return Err(CoreError::CaptureScreenSize);
+                }
+                let mut gdi = GdiCapture::new(width, height)?;
+                let res = gdi.capture(gray, origin_x, origin_y, width, height)?;
+                *capture = Some(ScreenCapture::Gdi(gdi));
+                Ok(res)
+            }
+        },
+        Some(ScreenCapture::Gdi(gdi)) => {
+            let origin_x = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
+            let origin_y = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
+            let width = unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) };
+            let height = unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) };
+            if width <= 0 || height <= 0 {
+                return Err(CoreError::CaptureScreenSize);
+            }
+            if gdi.width != width || gdi.height != height {
+                *gdi = GdiCapture::new(width, height)?;
+            }
+            gdi.capture(gray, origin_x, origin_y, width, height)
+        }
+        None => Err(CoreError::CaptureNotInitialized),
     }
-    let capture = capture.as_mut().ok_or(CoreError::CaptureNotInitialized)?;
-    unsafe {
-        BitBlt(
-            capture.memory_dc,
-            0,
-            0,
-            width,
-            height,
-            Some(capture.screen_dc),
-            origin_x,
-            origin_y,
-            SRCCOPY | CAPTUREBLT,
-        )
-        .map_err(|error| CoreError::CapturePixels(error.to_string()))?;
-        let pixel_bytes = (width as usize)
-            .checked_mul(height as usize)
-            .and_then(|pixels| pixels.checked_mul(4))
-            .ok_or(CoreError::DimensionsTooLarge("Screenshot"))?;
-        let bgra = std::slice::from_raw_parts(capture.pixels, pixel_bytes);
-        bgra_to_gray(bgra, width as u32, height as u32, gray)?;
-    }
-    Ok((width as u32, height as u32, origin_x, origin_y))
 }

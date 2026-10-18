@@ -2,9 +2,9 @@ pub(crate) mod grayscale;
 pub(crate) mod pool;
 pub(crate) mod template;
 
-pub(crate) use grayscale::bgra_to_gray;
 #[cfg(test)]
 pub(crate) use grayscale::rgb_to_gray;
+pub(crate) use grayscale::{bgra_to_gray, rgb_pixel_to_gray};
 #[cfg(test)]
 pub(crate) use pool::DEFAULT_CLICK_DELAY_MS;
 pub(crate) use pool::{

@@ -26,7 +26,7 @@ statistics, and an isolated Behavior Tree Logic Builder panel.
 - `src/main.rs`: Windows GUI subsystem entry point.
 - `src/core/`: error types (`CoreError`) and shared definitions.
 - `src/matching/`: template preparation, grayscale conversion, and Rayon matching pool.
-- `src/capture/`: screen capture resources and direct DIB grayscale buffer.
+- `src/capture/`: hybrid capture engine: GPU-accelerated DirectX 11 / DXGI Desktop Duplication (`dxgi.rs`) with sub-millisecond texture staging, automatic multi-monitor prioritization, and transparent fallback to GDI `BitBlt` (`screen.rs`).
 - `src/input/`: Windows `SendInput` mouse click injection.
 - `src/worker.rs`: worker thread loop and interruptible sleep.
 - `src/gui/`:
@@ -104,4 +104,5 @@ The compiled release executable is located at `target\release\RustyClicker.exe`.
 - Top-right navigation buttons stay anchored at top right and are architected to never overlap title/version: Row 1 hosts the brand icon and width-constrained title, while Row 2 hosts the version and credits directly beneath.
 - Enabled compact window sizing (`320x330` min track size in `WM_GETMINMAXINFO`) with dynamic preview scaling.
 - On the Clicker panel, repositioned the "Always on top" checkbox directly above the three action buttons (`F1 - Start`, `F2 - Stop`, `F3 - Close`), eliminating horizontal crowding.
+- Added GPU-accelerated DirectX 11 / DXGI Desktop Duplication capture engine (`dxgi.rs`) with sub-millisecond texture staging, multi-monitor display prioritization, and seamless automatic GDI `BitBlt` fallback.
 - Legacy `opencv_version` branch was purged from GitHub.
