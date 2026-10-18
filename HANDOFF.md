@@ -47,10 +47,11 @@ RustyClicker is a lightweight Windows desktop autoclicker suite written in Rust.
 - `src/tests/`:
   - `algorithms_tests.rs`: matching, grayscale conversion, DPI scaling, hotkey formatting, preferences round-tripping, and scan benchmarks.
   - `logic_tests.rs`: behavior tree JSON serialization, hierarchy integrity, and node CRUD operations.
-- Total 25 automated tests pass in release mode.
+- Total 26 automated tests pass in release mode.
 - Matching uses `corrmatch` 0.2.5 with `rayon` and `simd` features (ZNCC coarse-to-fine).
 - Matching thread choices are **1, 2, 4, and 8**, with **2** as the default.
 - Click interval accepts integer values from **1 to 10,000 ms**, default **100 ms**.
+- Classical clicker interval accepts integers from **0 to 10,000 ms** (0 = uncapped), default **50 ms**, button choice Left/Right/Middle.
 - Preferences are saved as `%APPDATA%\RustyClicker\rusty_clicker.json`, falling back to `%LOCALAPPDATA%`.
 - Release builds are optimized, use LTO, one codegen unit, and strip symbols.
 - License: PolyForm Noncommercial License 1.0.0 (`PolyForm-Noncommercial-1.0.0`), permitting personal/hobbyist/educational use while strictly forbidding commercial sale and unauthorized redistribution.
@@ -76,8 +77,8 @@ The compiled release executable is located at `target\release\RustyClicker.exe`.
 - Keep `Cargo.toml`'s package version, `Cargo.lock`, `README.md`'s version
   badge/text, and `CHANGELOG.md` in sync for a release.
 - Update the changelog with user-visible fixes and feature changes.
-- Push source changes to `rust_impl`, create a version tag such as `v1.3.0`,
-  then publish the release and upload the compiled EXE as an asset.
+- Push source changes and tags to `rust_impl`: `git push origin rust_impl --tags`.
+- GitHub CLI (`gh`) is not installed on this machine. To create a release and attach `RustyClicker.exe`, retrieve the stored GitHub token using `git credential fill` (`protocol=https` and `host=github.com`) and call the GitHub REST API (`POST /repos/V037/RustyClicker/releases` followed by `POST uploads.github.com/.../assets?name=RustyClicker.exe`).
 - The Rust executable name is `RustyClicker.exe`; the Windows app icon is
   embedded from the project assets/resource build setup.
 
