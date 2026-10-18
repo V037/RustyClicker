@@ -2,6 +2,7 @@ pub(crate) mod controls;
 pub(crate) mod drawing;
 pub(crate) mod gdi;
 pub(crate) mod layout;
+pub(crate) mod logic_gui;
 pub(crate) mod preferences;
 pub(crate) mod settings;
 pub(crate) mod state;
@@ -50,12 +51,17 @@ pub(crate) const ID_CLEAR_IMAGE: usize = 20;
 pub(crate) const ID_BRAND_ICON: usize = 22;
 pub(crate) const ID_SLOT_COUNT_COMBO: usize = 23;
 pub(crate) const ID_THREAD_COUNT_COMBO: usize = 24;
+pub(crate) const ID_CLICKER_BUTTON: usize = 25;
 pub(crate) const ID_SLOT_LABEL: usize = 302;
 pub(crate) const ID_PREVIEW_LABEL: usize = 303;
 pub(crate) const ID_STATUS_LABEL: usize = 304;
 pub(crate) const ID_EMPTY_PREVIEW: usize = 306;
 pub(crate) const ID_CREDIT_LABEL: usize = 307;
 pub(crate) const ID_VERSION_LABEL: usize = 308;
+pub(crate) const ID_MENU_STATUS_TITLE: usize = 311;
+pub(crate) const ID_MENU_SUMMARY_LABEL: usize = 312;
+pub(crate) const ID_MENU_HOTKEY_LABEL: usize = 313;
+pub(crate) const ID_MENU_TIPS_LABEL: usize = 314;
 pub(crate) const BUTTON_STYLE: u32 = windows::Win32::UI::WindowsAndMessaging::BS_OWNERDRAW as u32;
 pub(crate) const IMAGE_BITMAP: usize = 0;
 
@@ -63,6 +69,12 @@ pub(crate) const IMAGE_BITMAP: usize = 0;
 pub(crate) fn run() {
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        let icc = windows::Win32::UI::Controls::INITCOMMONCONTROLSEX {
+            dwSize: std::mem::size_of::<windows::Win32::UI::Controls::INITCOMMONCONTROLSEX>()
+                as u32,
+            dwICC: windows::Win32::UI::Controls::ICC_TREEVIEW_CLASSES,
+        };
+        let _ = windows::Win32::UI::Controls::InitCommonControlsEx(&icc);
         let instance = match GetModuleHandleW(None) {
             Ok(module) => HINSTANCE(module.0),
             Err(error) => {

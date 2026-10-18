@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.2.2] - 2026-10-18 (Beta)
+
+> **Note:** This is a beta preview release featuring the new Behavior Tree Logic Builder and redesigned modular dashboard.
+
+### Added
+
+- **Behavior Tree Logic Builder Panel**: Visual two-pane Win32 editor (`SysTreeView32`) with dynamic property configuration for nodes (`ClickImage`, `Repeat`, `IfElse`, `Sequence`) and JSON tree import/export.
+- **Dedicated Clicker Panel**: Relocated clicker controls, target image slot selector, and dynamic preview into a dedicated panel.
+- **Compact Window Resizing**: Support for compact minimum window sizes down to 320x330 (DPI scaled) with dynamic preview height adaptation.
+
+### Changed
+
+- **Refactored Main Menu**: Transformed main window into a clean System Overview dashboard displaying live statistics, hotkey cheatsheet, and persistent brand header, removing redundant middle navigation buttons.
+- **Non-Overlapping Top Header**: Pinned top-right navigation buttons (`Clicker`, `Logic`, `Settings`, `Back`) with dynamically bounded title width and subtitle row (version badge and credits) that never overlap the buttons at any window width.
+- **Clicker Action Layout**: Positioned the "Always on top" checkbox directly above the three action buttons (`F1 - Start`, `F2 - Stop`, `F3 - Close`), resolving narrow window horizontal crowding.
+
 ## [1.2.1] - 2026-10-18
 
 ### Changed

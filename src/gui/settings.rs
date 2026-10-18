@@ -1,9 +1,8 @@
 use super::{
-    ID_CLEAR_IMAGE, ID_CLOSE, ID_SETTINGS, ID_START, MAX_IMAGE_COUNT,
+    ID_CLEAR_IMAGE, ID_CLICKER_BUTTON, ID_CLOSE, ID_SETTINGS, ID_START, MAX_IMAGE_COUNT,
     gdi::OwnedGdiObject,
-    layout::layout_controls,
     preferences::{Theme, darken, rgb},
-    state::{AppState, set_text},
+    state::{ActivePanel, AppState, set_text},
 };
 use crate::matching::{MATCH_THREAD_OPTIONS, MAX_CLICK_DELAY_MS, MIN_CLICK_DELAY_MS};
 use std::sync::atomic::Ordering;
@@ -13,9 +12,7 @@ use windows::Win32::{
         Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute},
         Gdi::{CreateSolidBrush, HBRUSH, InvalidateRect},
     },
-    UI::WindowsAndMessaging::{
-        CB_SETCURSEL, MB_ICONERROR, MB_ICONWARNING, SW_HIDE, SW_SHOW, SendMessageW, ShowWindow,
-    },
+    UI::WindowsAndMessaging::{CB_SETCURSEL, MB_ICONERROR, MB_ICONWARNING, SendMessageW},
 };
 
 pub(crate) const DEFAULT_IMAGE_COUNT: usize = 10;
@@ -64,8 +61,15 @@ impl Theme {
             Self::Green => rgb(55, 75, 63),
             Self::Purple => rgb(76, 61, 91),
         };
-        let primary = id == ID_START || id == ID_SETTINGS;
-        let danger = id == ID_CLOSE || id == ID_CLEAR_IMAGE;
+        let primary = id == ID_START
+            || id == ID_SETTINGS
+            || id == ID_CLICKER_BUTTON
+            || id == super::logic_gui::ID_LOGIC_BUTTON
+            || id == super::logic_gui::ID_LOGIC_APPLY_BTN
+            || id == super::logic_gui::ID_LOGIC_SAVE_BTN
+            || id == super::logic_gui::ID_LOGIC_LOAD_BTN;
+        let danger =
+            id == ID_CLOSE || id == ID_CLEAR_IMAGE || id == super::logic_gui::ID_LOGIC_DELETE_BTN;
         let danger_accent = rgb(244, 63, 63);
         let fill = if primary {
             if selected { darken(surface) } else { surface }
@@ -132,24 +136,16 @@ impl Theme {
 
 /// Owns settings-page interactions and applies persisted setting changes to the running UI.
 impl AppState {
+    #[allow(dead_code)]
     pub(crate) fn set_settings_open(&mut self, window: HWND, open: bool) {
-        self.settings_open = open;
-        let visibility = if open { SW_HIDE } else { SW_SHOW };
-        let settings_visibility = if open { SW_SHOW } else { SW_HIDE };
-        unsafe {
-            for control in &self.main_controls {
-                let _ = ShowWindow(*control, visibility);
-            }
-            for control in &self.settings_controls {
-                let _ = ShowWindow(*control, settings_visibility);
-            }
-        }
-        set_text(self.main_heading, "RustyClicker");
-        set_text(self.settings_button, if open { "Back" } else { "Settings" });
-        layout_controls(window, self);
-        if !open && let Err(error) = self.refresh_preview(window) {
-            self.show_message(&error, MB_ICONERROR);
-        }
+        self.set_panel(
+            window,
+            if open {
+                ActivePanel::Settings
+            } else {
+                ActivePanel::MainMenu
+            },
+        );
     }
 
     pub(crate) fn set_click_delay(&mut self, delay: u64) {
@@ -166,6 +162,7 @@ impl AppState {
             worker.click_delay_ms.store(delay, Ordering::Release);
         }
         set_text(self.click_delay_input, &delay.to_string());
+        self.update_menu_summary();
         self.save_preferences();
     }
 
@@ -178,6 +175,7 @@ impl AppState {
         if let Some(worker) = &self.worker {
             worker.match_threads.store(threads, Ordering::Release);
         }
+        self.update_menu_summary();
         self.save_preferences();
     }
 
@@ -199,7 +197,10 @@ impl AppState {
             );
         }
         self.refresh_slot_names();
-        if let Err(error) = self.refresh_preview(window) {
+        self.update_menu_summary();
+        if self.active_panel == ActivePanel::Clicker
+            && let Err(error) = self.refresh_preview(window)
+        {
             self.show_message(&error, MB_ICONERROR);
         }
         self.save_preferences();
@@ -222,12 +223,17 @@ impl AppState {
             self.surface_brush = new_surface_brush;
             let _ = InvalidateRect(Some(window), None, true);
             for control in self
-                .main_controls
+                .clicker_controls
                 .iter()
+                .chain(self.menu_controls.iter())
                 .chain(std::iter::once(&self.main_brand_icon))
                 .chain(std::iter::once(&self.main_heading))
                 .chain(std::iter::once(&self.version_label))
+                .chain(std::iter::once(&self.credit_label))
                 .chain(self.settings_controls.iter())
+                .chain(self.logic_controls.iter())
+                .chain(std::iter::once(&self.clicker_button))
+                .chain(std::iter::once(&self.logic_button))
                 .chain(std::iter::once(&self.settings_button))
             {
                 let _ = InvalidateRect(Some(*control), None, true);

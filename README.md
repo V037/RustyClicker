@@ -1,8 +1,8 @@
 <img width="97" height="105" alt="immagine-removebg-preview" src="https://github.com/user-attachments/assets/13c16a91-deb2-4c00-95a6-8a2ff50697d5" />
 
-# RustyClicker  <img alt="GitHub code size in bytes" src="https://img.shields.io/github/languages/code-size/V037/RustyClicker">
+# RustyClicker  <img alt="GitHub code size in bytes" src="https://img.shields.io/github/languages/code-size/V037/RustyClicker"> ![Lines of Code](https://tokei.rs/b1/github/V037/RustyClicker)
 
-**Version:** v1.2.1
+**Version:** v1.2.2 (Beta)
 
 RustyClicker is a lightweight Windows autoclicker written in Rust. It watches
 the screen for selected image targets and clicks the center of a target when it
@@ -14,11 +14,12 @@ finds one.
   cross-correlation (ZNCC).
 - Configure between 1 and 99 image slots, and advance to the next configured
   target after a click.
+- Design complex automation routines using the built-in **Behavior Tree Logic Builder** (visual tree editor with JSON export/import).
 - Set the click interval to any integer from 1 to 10,000 ms (default: 100 ms).
 - Choose 1, 2, 4, or 8 Rayon threads for image matching (default: 2).
-- Use a compact, resizable window with five themes, an optional always-on-top
+- Use a compact, resizable window (down to 320x330) with five themes, an optional always-on-top
   setting, and image previews.
-- View the latest scan duration and total click count in the main window.
+- View the latest scan duration and total click count in the main window dashboard.
 - Use configurable 1-, 2-, 4-, or 8-thread Rayon pools with SIMD-enabled
   matching and no OpenCV runtime dependency.
 - Build a standalone executable with the rusty-cursor icon embedded.

@@ -1,9 +1,11 @@
 use super::{
-    BUTTON_STYLE, ID_ALWAYS_ON_TOP, ID_BRAND_ICON, ID_CLEAR_IMAGE, ID_CLOSE, ID_CREDIT_LABEL,
-    ID_DELAY_INPUT, ID_EMPTY_PREVIEW, ID_PREVIEW_LABEL, ID_SELECT_IMAGE, ID_SETTINGS,
+    BUTTON_STYLE, ID_ALWAYS_ON_TOP, ID_BRAND_ICON, ID_CLEAR_IMAGE, ID_CLICKER_BUTTON, ID_CLOSE,
+    ID_CREDIT_LABEL, ID_DELAY_INPUT, ID_EMPTY_PREVIEW, ID_MENU_HOTKEY_LABEL, ID_MENU_STATUS_TITLE,
+    ID_MENU_SUMMARY_LABEL, ID_MENU_TIPS_LABEL, ID_PREVIEW_LABEL, ID_SELECT_IMAGE, ID_SETTINGS,
     ID_SLOT_COMBO, ID_SLOT_COUNT_COMBO, ID_SLOT_LABEL, ID_START, ID_STATUS_LABEL, ID_STOP,
     ID_THEME_COMBO, ID_THREAD_COUNT_COMBO, ID_VERSION_LABEL, MAX_IMAGE_COUNT,
     layout::{layout_controls, update_ui_font},
+    logic_gui::{ID_LOGIC_BUTTON, create_logic_controls},
     preferences::Theme,
     settings::{
         ID_SETTINGS_DELAY_LABEL, ID_SETTINGS_SLOT_COUNT_LABEL, ID_SETTINGS_THEME_LABEL,
@@ -23,9 +25,9 @@ use windows::{
             WindowsAndMessaging::{
                 BM_SETCHECK, BS_AUTOCHECKBOX, CB_ADDSTRING, CB_SETCURSEL, CBS_DROPDOWNLIST,
                 CreateWindowExW, ES_AUTOHSCROLL, ES_NUMBER, HMENU, HWND_TOPMOST, MB_ICONERROR,
-                MB_ICONWARNING, SW_HIDE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SendMessageW,
-                SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WINDOW_STYLE, WS_BORDER, WS_CHILD,
-                WS_VISIBLE,
+                MB_ICONWARNING, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+                SendMessageW, SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WINDOW_STYLE, WS_BORDER,
+                WS_CHILD, WS_VISIBLE,
             },
         },
     },
@@ -90,12 +92,7 @@ pub(crate) unsafe fn create_controls(window: HWND, state: &mut AppState) {
         state.version_label = create_control(
             window,
             w!("STATIC"),
-            concat!(
-                "v",
-                env!("CARGO_PKG_VERSION_MAJOR"),
-                ".",
-                env!("CARGO_PKG_VERSION_MINOR")
-            ),
+            concat!("v", env!("CARGO_PKG_VERSION")),
             WINDOW_STYLE(0),
             290,
             22,
@@ -114,6 +111,78 @@ pub(crate) unsafe fn create_controls(window: HWND, state: &mut AppState) {
             30,
             ID_SETTINGS,
         );
+        state.logic_button = create_control(
+            window,
+            w!("BUTTON"),
+            "Logic",
+            WINDOW_STYLE(BUTTON_STYLE),
+            16,
+            12,
+            80,
+            30,
+            ID_LOGIC_BUTTON,
+        );
+        state.clicker_button = create_control(
+            window,
+            w!("BUTTON"),
+            "Clicker",
+            WINDOW_STYLE(BUTTON_STYLE),
+            16,
+            12,
+            80,
+            30,
+            ID_CLICKER_BUTTON,
+        );
+        state.menu_status_title = create_control(
+            window,
+            w!("STATIC"),
+            "SYSTEM OVERVIEW",
+            WINDOW_STYLE(0),
+            18,
+            64,
+            400,
+            20,
+            ID_MENU_STATUS_TITLE,
+        );
+        state.menu_summary_label = create_control(
+            window,
+            w!("STATIC"),
+            "Initializing...",
+            WINDOW_STYLE(windows::Win32::System::SystemServices::SS_LEFTNOWORDWRAP.0),
+            18,
+            88,
+            400,
+            22,
+            ID_MENU_SUMMARY_LABEL,
+        );
+        state.menu_hotkey_label = create_control(
+            window,
+            w!("STATIC"),
+            "Global Hotkeys:  [F1] Start Detection   •   [F2] Stop Worker   •   [F3] Close",
+            WINDOW_STYLE(windows::Win32::System::SystemServices::SS_LEFTNOWORDWRAP.0),
+            18,
+            116,
+            400,
+            22,
+            ID_MENU_HOTKEY_LABEL,
+        );
+        state.menu_tips_label = create_control(
+            window,
+            w!("STATIC"),
+            "Tip: Press F1 anytime to start scanning across all active monitors.",
+            WINDOW_STYLE(windows::Win32::System::SystemServices::SS_LEFTNOWORDWRAP.0),
+            18,
+            144,
+            400,
+            22,
+            ID_MENU_TIPS_LABEL,
+        );
+        state.menu_controls = vec![
+            state.menu_status_title,
+            state.menu_summary_label,
+            state.menu_hotkey_label,
+            state.menu_tips_label,
+        ];
         state.slot_label = create_control(
             window,
             w!("STATIC"),
@@ -272,7 +341,7 @@ pub(crate) unsafe fn create_controls(window: HWND, state: &mut AppState) {
             40,
             ID_ALWAYS_ON_TOP,
         );
-        state.main_controls = vec![
+        state.clicker_controls = vec![
             state.slot_label,
             state.slot_combo,
             state.preview_label,
@@ -282,7 +351,6 @@ pub(crate) unsafe fn create_controls(window: HWND, state: &mut AppState) {
             state.select_image_button,
             state.clear_image_button,
             state.status_label,
-            state.credit_label,
             state.start_button,
             state.stop_button,
             state.close_button,
@@ -409,10 +477,17 @@ pub(crate) unsafe fn create_controls(window: HWND, state: &mut AppState) {
             state.slot_count_combo,
             settings_note,
         ];
+        create_logic_controls(window, state);
         let mut drag_setup_failed = false;
         for control in [
             state.main_brand_icon,
             state.main_heading,
+            state.version_label,
+            state.credit_label,
+            state.menu_status_title,
+            state.menu_summary_label,
+            state.menu_hotkey_label,
+            state.menu_tips_label,
             state.slot_label,
             state.preview_label,
             state.preview,
@@ -486,9 +561,19 @@ pub(crate) unsafe fn create_controls(window: HWND, state: &mut AppState) {
         if state.background_brush.is_null() || state.surface_brush.is_null() {
             state.show_message("Could not create the window background.", MB_ICONERROR);
         }
+        for control in &state.clicker_controls {
+            let _ = ShowWindow(*control, SW_HIDE);
+        }
         for control in &state.settings_controls {
             let _ = ShowWindow(*control, SW_HIDE);
         }
+        for control in &state.logic_controls {
+            let _ = ShowWindow(*control, SW_HIDE);
+        }
+        for control in &state.menu_controls {
+            let _ = ShowWindow(*control, SW_SHOW);
+        }
+        state.update_menu_summary();
         let dark_titlebar = i32::from(state.theme != Theme::Light);
         let _ = DwmSetWindowAttribute(
             window,

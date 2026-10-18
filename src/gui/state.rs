@@ -39,11 +39,26 @@ use windows::{
     core::PCWSTR,
 };
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ActivePanel {
+    MainMenu,
+    Clicker,
+    Logic,
+    Settings,
+}
+
 pub(crate) struct AppState {
+    pub(crate) active_panel: ActivePanel,
     pub(crate) paths: [Option<PathBuf>; MAX_IMAGE_COUNT],
     pub(crate) image_count: usize,
-    pub(crate) main_controls: Vec<HWND>,
+    pub(crate) clicker_controls: Vec<HWND>,
+    pub(crate) menu_controls: Vec<HWND>,
     pub(crate) settings_controls: Vec<HWND>,
+    pub(crate) clicker_button: HWND,
+    pub(crate) menu_status_title: HWND,
+    pub(crate) menu_summary_label: HWND,
+    pub(crate) menu_hotkey_label: HWND,
+    pub(crate) menu_tips_label: HWND,
     pub(crate) status_label: HWND,
     pub(crate) credit_label: HWND,
     pub(crate) slot_label: HWND,
@@ -68,6 +83,29 @@ pub(crate) struct AppState {
     pub(crate) slot_count_combo: HWND,
     pub(crate) thread_count_combo: HWND,
     pub(crate) settings_open: bool,
+    pub(crate) logic_controls: Vec<HWND>,
+    pub(crate) logic_button: HWND,
+    pub(crate) logic_tree_title: HWND,
+    pub(crate) logic_tree_view: HWND,
+    pub(crate) logic_add_click_btn: HWND,
+    pub(crate) logic_add_repeat_btn: HWND,
+    pub(crate) logic_add_ifelse_btn: HWND,
+    pub(crate) logic_delete_btn: HWND,
+    pub(crate) logic_props_title: HWND,
+    pub(crate) logic_node_type_label: HWND,
+    pub(crate) logic_prop1_label: HWND,
+    pub(crate) logic_prop1_edit: HWND,
+    pub(crate) logic_prop2_label: HWND,
+    pub(crate) logic_prop2_edit: HWND,
+    pub(crate) logic_prop3_label: HWND,
+    pub(crate) logic_prop3_edit: HWND,
+    pub(crate) logic_apply_btn: HWND,
+    pub(crate) logic_save_btn: HWND,
+    pub(crate) logic_load_btn: HWND,
+    pub(crate) logic_status_label: HWND,
+    pub(crate) logic_open: bool,
+    pub(crate) logic_selected_node_id: Option<usize>,
+    pub(crate) logic_state: super::logic_gui::LogicState,
     pub(crate) selected_slot: usize,
     pub(crate) preview_bitmap: OwnedGdiObject<HBITMAP>,
     pub(crate) preview_source: Option<image::DynamicImage>,
@@ -95,10 +133,17 @@ impl AppState {
                     .join("rusty_clicker.json")
             });
         let mut state = Self {
+            active_panel: ActivePanel::MainMenu,
             paths: std::array::from_fn(|_| None),
             image_count: DEFAULT_IMAGE_COUNT,
-            main_controls: Vec::with_capacity(16),
+            clicker_controls: Vec::with_capacity(16),
+            menu_controls: Vec::with_capacity(10),
             settings_controls: Vec::with_capacity(8),
+            clicker_button: HWND::default(),
+            menu_status_title: HWND::default(),
+            menu_summary_label: HWND::default(),
+            menu_hotkey_label: HWND::default(),
+            menu_tips_label: HWND::default(),
             status_label: HWND::default(),
             credit_label: HWND::default(),
             slot_label: HWND::default(),
@@ -123,6 +168,29 @@ impl AppState {
             slot_count_combo: HWND::default(),
             thread_count_combo: HWND::default(),
             settings_open: false,
+            logic_controls: Vec::with_capacity(20),
+            logic_button: HWND::default(),
+            logic_tree_title: HWND::default(),
+            logic_tree_view: HWND::default(),
+            logic_add_click_btn: HWND::default(),
+            logic_add_repeat_btn: HWND::default(),
+            logic_add_ifelse_btn: HWND::default(),
+            logic_delete_btn: HWND::default(),
+            logic_props_title: HWND::default(),
+            logic_node_type_label: HWND::default(),
+            logic_prop1_label: HWND::default(),
+            logic_prop1_edit: HWND::default(),
+            logic_prop2_label: HWND::default(),
+            logic_prop2_edit: HWND::default(),
+            logic_prop3_label: HWND::default(),
+            logic_prop3_edit: HWND::default(),
+            logic_apply_btn: HWND::default(),
+            logic_save_btn: HWND::default(),
+            logic_load_btn: HWND::default(),
+            logic_status_label: HWND::default(),
+            logic_open: false,
+            logic_selected_node_id: None,
+            logic_state: super::logic_gui::LogicState::default(),
             selected_slot: 0,
             preview_bitmap: OwnedGdiObject::default(),
             preview_source: None,
@@ -187,9 +255,154 @@ impl AppState {
         }
     }
 
+    pub(crate) fn set_panel(&mut self, window: HWND, panel: ActivePanel) {
+        self.active_panel = panel;
+        self.settings_open = panel == ActivePanel::Settings;
+        self.logic_open = panel == ActivePanel::Logic;
+
+        let show_menu = if panel == ActivePanel::MainMenu {
+            SW_SHOW
+        } else {
+            SW_HIDE
+        };
+        let show_clicker = if panel == ActivePanel::Clicker {
+            SW_SHOW
+        } else {
+            SW_HIDE
+        };
+        let show_logic = if panel == ActivePanel::Logic {
+            SW_SHOW
+        } else {
+            SW_HIDE
+        };
+        let show_settings = if panel == ActivePanel::Settings {
+            SW_SHOW
+        } else {
+            SW_HIDE
+        };
+
+        unsafe {
+            for control in &self.menu_controls {
+                let _ = ShowWindow(*control, show_menu);
+            }
+            for control in &self.clicker_controls {
+                let _ = ShowWindow(*control, show_clicker);
+            }
+            for control in &self.logic_controls {
+                let _ = ShowWindow(*control, show_logic);
+            }
+            for control in &self.settings_controls {
+                let _ = ShowWindow(*control, show_settings);
+            }
+
+            match panel {
+                ActivePanel::MainMenu => {
+                    let _ = ShowWindow(self.clicker_button, SW_SHOW);
+                    let _ = ShowWindow(self.logic_button, SW_SHOW);
+                    let _ = ShowWindow(self.settings_button, SW_SHOW);
+                }
+                ActivePanel::Clicker => {
+                    let _ = ShowWindow(self.clicker_button, SW_SHOW);
+                    let _ = ShowWindow(self.logic_button, SW_HIDE);
+                    let _ = ShowWindow(self.settings_button, SW_HIDE);
+                }
+                ActivePanel::Logic => {
+                    let _ = ShowWindow(self.clicker_button, SW_HIDE);
+                    let _ = ShowWindow(self.logic_button, SW_SHOW);
+                    let _ = ShowWindow(self.settings_button, SW_HIDE);
+                }
+                ActivePanel::Settings => {
+                    let _ = ShowWindow(self.clicker_button, SW_HIDE);
+                    let _ = ShowWindow(self.logic_button, SW_HIDE);
+                    let _ = ShowWindow(self.settings_button, SW_SHOW);
+                }
+            }
+        }
+
+        set_text(
+            self.main_heading,
+            match panel {
+                ActivePanel::MainMenu => "RustyClicker",
+                ActivePanel::Clicker => "Image Clicker",
+                ActivePanel::Logic => "Logic Builder",
+                ActivePanel::Settings => "Settings",
+            },
+        );
+        set_text(
+            self.clicker_button,
+            if panel == ActivePanel::Clicker {
+                "Back"
+            } else {
+                "Clicker"
+            },
+        );
+        set_text(
+            self.logic_button,
+            if panel == ActivePanel::Logic {
+                "Back"
+            } else {
+                "Logic"
+            },
+        );
+        set_text(
+            self.settings_button,
+            if panel == ActivePanel::Settings {
+                "Back"
+            } else {
+                "Settings"
+            },
+        );
+
+        self.update_menu_summary();
+        layout_controls(window, self);
+
+        if panel == ActivePanel::Clicker {
+            if let Err(error) = self.refresh_preview(window) {
+                self.show_message(&error, MB_ICONERROR);
+            }
+        } else if panel == ActivePanel::Logic {
+            super::logic_gui::populate_treeview(self.logic_tree_view, &self.logic_state);
+        }
+    }
+
+    pub(crate) fn update_menu_summary(&self) {
+        if self.menu_summary_label.0.is_null() {
+            return;
+        }
+        let loaded_targets = self.paths[..self.image_count]
+            .iter()
+            .filter(|p| p.is_some())
+            .count();
+        let is_running = self
+            .worker
+            .as_ref()
+            .is_some_and(|w| w.running.load(Ordering::Acquire));
+        let summary = if is_running {
+            if let Some(worker) = &self.worker {
+                let clicks = worker.clicks.load(Ordering::Relaxed);
+                let scan_ms = worker.scan_duration_us.load(Ordering::Relaxed) as f64 / 1_000.0;
+                format!("Status: RUNNING • {clicks} clicks • Scan: {scan_ms:.2} ms")
+            } else {
+                "Status: RUNNING".to_owned()
+            }
+        } else {
+            format!(
+                "Targets: {loaded_targets}/{count} configured  •  Interval: {delay} ms  •  Threads: {threads}",
+                count = self.image_count,
+                delay = self.click_delay_ms,
+                threads = self.match_threads
+            )
+        };
+        set_text(self.menu_summary_label, &summary);
+    }
+
     pub(crate) fn set_running_ui(&mut self, window: HWND, running: bool) {
         unsafe {
-            let visibility = if running { SW_HIDE } else { SW_SHOW };
+            let visibility = if running || self.active_panel != ActivePanel::Clicker {
+                SW_HIDE
+            } else {
+                SW_SHOW
+            };
             let _ = ShowWindow(self.preview_label, visibility);
             let _ = ShowWindow(self.preview, visibility);
             let _ = ShowWindow(self.empty_preview, visibility);
@@ -198,8 +411,12 @@ impl AppState {
             self.clear_preview_bitmap();
             self.preview_source = None;
         }
+        self.update_menu_summary();
         layout_controls(window, self);
-        if !running && let Err(error) = self.refresh_preview(window) {
+        if !running
+            && self.active_panel == ActivePanel::Clicker
+            && let Err(error) = self.refresh_preview(window)
+        {
             self.show_message(&error, MB_ICONERROR);
         }
     }
@@ -216,7 +433,14 @@ impl AppState {
                 .as_ref()
                 .is_some_and(|worker| worker.running.load(Ordering::Acquire));
             unsafe {
-                let _ = ShowWindow(self.empty_preview, if running { SW_HIDE } else { SW_SHOW });
+                let _ = ShowWindow(
+                    self.empty_preview,
+                    if running || self.active_panel != ActivePanel::Clicker {
+                        SW_HIDE
+                    } else {
+                        SW_SHOW
+                    },
+                );
             }
             return Ok(());
         };
@@ -418,6 +642,7 @@ impl AppState {
         let path = PathBuf::from(OsString::from_wide(&file_buffer[..end]));
         self.paths[slot] = Some(path);
         self.refresh_slot_names();
+        self.update_menu_summary();
         if let Err(error) = self.refresh_preview(window) {
             self.show_message(&error, MB_ICONERROR);
         }
@@ -427,6 +652,7 @@ impl AppState {
     pub(crate) fn clear_selected_image(&mut self, window: HWND) {
         self.paths[self.selected_slot] = None;
         self.refresh_slot_names();
+        self.update_menu_summary();
         if let Err(error) = self.refresh_preview(window) {
             self.show_message(&error, MB_ICONERROR);
         }
@@ -495,6 +721,7 @@ impl AppState {
         });
         self.worker = Some(Arc::clone(&worker));
         set_text(self.status_label, "Running | Scan: waiting");
+        self.update_menu_summary();
 
         let spawn_result = thread::Builder::new()
             .name("rusty-clicker".to_owned())
@@ -508,6 +735,7 @@ impl AppState {
                 MB_ICONERROR,
             );
             set_text(self.status_label, "Stopped.");
+            self.update_menu_summary();
         } else {
             self.set_running_ui(window, true);
         }
@@ -522,6 +750,7 @@ impl AppState {
         } else {
             set_text(self.status_label, "Stopped.");
         }
+        self.update_menu_summary();
     }
 
     pub(crate) fn set_always_on_top(&mut self, window: HWND, enabled: bool) {

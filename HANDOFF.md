@@ -8,19 +8,18 @@ before acting: release details and working-tree state can change.
 
 - Repository: `V037/RustyClicker`
 - Main development branch: `rust_impl`
-- Last verified release: **v1.2.1**
-- Release tag: `v1.2.1`
-- Release commit: `1eae53d`
-- GitHub release: <https://github.com/V037/RustyClicker/releases/tag/v1.2.0>
-- The workspace was clean at handoff creation.
+- The legacy `opencv_version` branch has been deleted both locally and remotely on GitHub.
+- Current release tag: **v1.2.2 (Beta)**
+- Binary target: Native Windows x64 executable, size ~791 KB (< 1 MB).
+- GUI Framework Decision: Retained native Win32 API (`windows-rs`) instead of `egui` to strictly satisfy the < 1 MB size budget and zero GPU gaming overhead.
 
 ## What the app does
 
-RustyClicker is a Windows desktop image-target autoclicker written in Rust. It
+RustyClicker is a lightweight Windows desktop image-target autoclicker written in Rust. It
 captures the virtual desktop, searches for selected image targets, moves the
 cursor to a match, and clicks. It has up to 99 image slots, previews, five
-themes, global hotkeys, an optional always-on-top setting, and scan/click
-statistics.
+themes, global hotkeys (F1 Start, F2 Stop, F3 Close), an optional always-on-top setting, scan/click
+statistics, and an isolated Behavior Tree Logic Builder panel.
 
 ## Architecture and important implementation details
 
@@ -30,23 +29,25 @@ statistics.
 - `src/capture/`: screen capture resources and direct DIB grayscale buffer.
 - `src/input/`: Windows `SendInput` mouse click injection.
 - `src/worker.rs`: worker thread loop and interruptible sleep.
-- `src/gui/`: Win32 GUI controls, layout, GDI RAII, theme definitions, preferences persistence, and window procedures.
-- `src/tests/`: unit tests for core matching, formatting, and migrations.
-- Matching uses `corrmatch` 0.2.5 with `rayon` and `simd` features. It searches
-  grayscale images with ZNCC/coarse-to-fine matching.
+- `src/gui/`:
+  - `mod.rs`: common controls initialization (`ICC_TREEVIEW_CLASSES`) and window creation.
+  - `controls.rs`: Win32 control creation (`create_control`) for header, main menu dashboard, clicker panel, settings panel, and logic tree panel.
+  - `layout.rs`: dynamic DPI-aware control positioning and font sizing for header, main menu cards, clicker view, settings view, and logic builder.
+  - `settings.rs`: settings panel, themes, slot count, thread count, click interval.
+  - `logic_gui.rs`: **Behavior Tree Logic Builder panel**:
+    - Two-pane Win32 view: Left pane with `SysTreeView32` and action buttons (`+ Click`, `+ Repeat`, `+ If/Else`, `Delete`). Right pane with property inspector edit controls and `Apply Changes`.
+    - Nodes: `ClickImage`, `Repeat`, `IfElse`, `Sequence`.
+    - Serde integration: Export (`GetSaveFileNameW`) and Import (`GetOpenFileNameW`) of nested logic trees to/from `.json`.
+  - `state.rs`: centralized `AppState` struct managing all handles and unified panel navigation via `ActivePanel` (`MainMenu`, `Clicker`, `Logic`, `Settings`), `set_panel`, and live menu status summary updates.
+  - `wndproc.rs`: message routing, hotkeys, dragging, custom button owner-drawing, `WM_NOTIFY` (`TVN_SELCHANGEDW`) handling, and panel switching commands.
+- `src/tests/`:
+  - `algorithms_tests.rs`: matching, grayscale conversion, DPI scaling, and release scan benchmarks.
+  - `logic_tests.rs`: behavior tree JSON serialization, hierarchy integrity, and node CRUD operations.
+- Total 22 automated tests pass in release mode.
+- Matching uses `corrmatch` 0.2.5 with `rayon` and `simd` features (ZNCC coarse-to-fine).
 - Matching thread choices are **1, 2, 4, and 8**, with **2** as the default.
-  Each choice has a lazily initialized persistent Rayon pool.
-- Click interval accepts integer values from **1 to 10,000 ms**, default
-  **100 ms**. This is separate from the internal idle scan interval.
-- Preferences are saved as `%APPDATA%\RustyClicker\rusty_clicker.json`, falling
-  back to `%LOCALAPPDATA%`. Existing `image_clicker_preferences.json` files
-  beside the executable are migrated on first launch.
-- GDI resources in the GUI use RAII ownership. Screen capture resources use a
-  `ScreenCapture` drop guard. Mouse clicks use `SendInput`.
-- Core algorithm failures are represented by `CoreError` and formatted for
-  display at the UI boundary.
-- The Settings header's top-right **Back** button returns to the main view;
-  there is no separate “Back to images” button.
+- Click interval accepts integer values from **1 to 10,000 ms**, default **100 ms**.
+- Preferences are saved as `%APPDATA%\RustyClicker\rusty_clicker.json`, falling back to `%LOCALAPPDATA%`.
 - Release builds are optimized, use LTO, one codegen unit, and strip symbols.
 
 ## Build and validation
@@ -54,7 +55,7 @@ statistics.
 Requirements: Windows, Rust 1.91+, MSVC Rust toolchain, and Visual Studio C++
 build tools.
 
-Run the smallest relevant checks, then escalate when needed:
+Standard verification commands:
 
 ```powershell
 cargo fmt --check
@@ -63,24 +64,15 @@ cargo test --release
 cargo build --release
 ```
 
-The usual executable output is `target\release\RustyClicker.exe`. If Windows
-reports that it is locked by a running app, build to a separate target
-directory, for example:
-
-```powershell
-cargo build --release --target-dir target\handoff-build
-```
+The compiled release executable is located at `target\release\RustyClicker.exe`.
 
 ## Release and documentation notes
 
 - Keep `Cargo.toml`'s package version, `Cargo.lock`, `README.md`'s version
   badge/text, and `CHANGELOG.md` in sync for a release.
 - Update the changelog with user-visible fixes and feature changes.
-- Push source changes to `rust_impl`, create a version tag such as `v1.2.0`,
+- Push source changes to `rust_impl`, create a version tag such as `v1.2.1`,
   then publish the optimized EXE as a GitHub release asset if requested.
-- README performance figures are synthetic matcher-only measurements, not a
-  guarantee for a user's hardware or full screen-capture/click cycle. Preserve
-  that qualification when editing performance claims.
 - The Rust executable name is `RustyClicker.exe`; the Windows app icon is
   embedded from the project assets/resource build setup.
 
@@ -100,10 +92,15 @@ cargo build --release --target-dir target\handoff-build
 ## Useful project history
 
 - OpenCV was replaced with the Rust-native `corrmatch` matcher.
-- The matcher uses a persistent configurable Rayon pool and SIMD support; the
-  README documents its limitations and non-guaranteed match ordering.
 - v1.1 added GUI GDI RAII, `SendInput`, per-user preferences, and migration
   from the old preference-file location.
 - v1.2 added typed core errors, configurable thread count and click interval,
-  settings-preview restoration, label styling fixes, and removal of the
-  redundant Settings navigation button.
+  settings-preview restoration, label styling fixes, and modularized code.
+- v1.2.1 modularized monolithic GUI into dedicated submodules (`gui/controls.rs`, `gui/layout.rs`, `gui/settings.rs`, `gui/state.rs`, `gui/wndproc.rs`, `gui/logic_gui.rs`).
+- Added Behavior Tree Logic Builder panel with Win32 `SysTreeView32`, dynamic property editor, and JSON nested tree serialization.
+- Relocated original clicker UI into a dedicated Clicker panel with seamless navigation buttons across all views.
+- Transformed main window into a clean System Overview dashboard: removed redundant middle navigation buttons and welcome header, keeping logo, title, version, and credits.
+- Top-right navigation buttons stay anchored at top right and are architected to never overlap title/version: Row 1 hosts the brand icon and width-constrained title, while Row 2 hosts the version and credits directly beneath.
+- Enabled compact window sizing (`320x330` min track size in `WM_GETMINMAXINFO`) with dynamic preview scaling.
+- On the Clicker panel, repositioned the "Always on top" checkbox directly above the three action buttons (`F1 - Start`, `F2 - Stop`, `F3 - Close`), eliminating horizontal crowding.
+- Legacy `opencv_version` branch was purged from GitHub.

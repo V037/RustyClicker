@@ -1,8 +1,8 @@
 use super::{
-    ID_ALWAYS_ON_TOP, ID_BRAND_ICON, ID_CLEAR_IMAGE, ID_CLOSE, ID_CREDIT_LABEL, ID_DELAY_INPUT,
-    ID_EMPTY_PREVIEW, ID_PREVIEW_LABEL, ID_SELECT_IMAGE, ID_SETTINGS, ID_SLOT_COMBO,
-    ID_SLOT_COUNT_COMBO, ID_SLOT_LABEL, ID_START, ID_STATUS_LABEL, ID_STOP, ID_THEME_COMBO,
-    ID_THREAD_COUNT_COMBO, TIMER_ID,
+    ID_ALWAYS_ON_TOP, ID_BRAND_ICON, ID_CLEAR_IMAGE, ID_CLICKER_BUTTON, ID_CLOSE, ID_CREDIT_LABEL,
+    ID_DELAY_INPUT, ID_EMPTY_PREVIEW, ID_MENU_HOTKEY_LABEL, ID_MENU_STATUS_TITLE, ID_PREVIEW_LABEL,
+    ID_SELECT_IMAGE, ID_SETTINGS, ID_SLOT_COMBO, ID_SLOT_COUNT_COMBO, ID_SLOT_LABEL, ID_START,
+    ID_STATUS_LABEL, ID_STOP, ID_THEME_COMBO, ID_THREAD_COUNT_COMBO, TIMER_ID,
     controls::create_controls,
     drawing::{draw_button, draw_cursor_icon, draw_empty_preview},
     layout::{layout_controls, scale, update_ui_font},
@@ -11,14 +11,14 @@ use super::{
         ID_SETTINGS_DELAY_LABEL, ID_SETTINGS_SLOT_COUNT_LABEL, ID_SETTINGS_THEME_LABEL,
         ID_SETTINGS_THREADS_LABEL,
     },
-    state::{AppState, set_text},
+    state::{ActivePanel, AppState, set_text},
 };
 use std::sync::atomic::Ordering;
 use windows::Win32::{
     Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     Graphics::Gdi::{FillRect, HDC, ScreenToClient, SetBkColor, SetTextColor},
     UI::{
-        Controls::{BST_CHECKED, DRAWITEMSTRUCT},
+        Controls::{BST_CHECKED, DRAWITEMSTRUCT, NMHDR, NMTREEVIEWW, TVN_SELCHANGEDW},
         Input::KeyboardAndMouse::{MOD_NOREPEAT, RegisterHotKey, ReleaseCapture, UnregisterHotKey},
         WindowsAndMessaging::{
             BM_GETCHECK, CB_GETCURSEL, CBN_SELCHANGE, CallWindowProcW, DefWindowProcW,
@@ -28,7 +28,7 @@ use windows::Win32::{
             SetTimer, SetWindowLongPtrW, SetWindowPos, WM_CLOSE, WM_COMMAND, WM_CREATE,
             WM_CTLCOLORBTN, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY,
             WM_DPICHANGED, WM_DRAWITEM, WM_ERASEBKGND, WM_GETMINMAXINFO, WM_HOTKEY, WM_KEYDOWN,
-            WM_LBUTTONDOWN, WM_NCCREATE, WM_NCHITTEST, WM_SIZE, WM_TIMER, WNDPROC,
+            WM_LBUTTONDOWN, WM_NCCREATE, WM_NCHITTEST, WM_NOTIFY, WM_SIZE, WM_TIMER, WNDPROC,
         },
     },
 };
@@ -149,6 +149,10 @@ pub(crate) unsafe extern "system" fn window_proc(
                 ID_SETTINGS_THREADS_LABEL,
                 ID_SETTINGS_THEME_LABEL,
                 ID_SETTINGS_SLOT_COUNT_LABEL,
+                ID_MENU_STATUS_TITLE,
+                ID_MENU_HOTKEY_LABEL,
+                super::logic_gui::ID_LOGIC_TREE_TITLE,
+                super::logic_gui::ID_LOGIC_PROPS_TITLE,
             ]
             .contains(&control_id)
             {
@@ -179,8 +183,8 @@ pub(crate) unsafe extern "system" fn window_proc(
         }
         if message == WM_GETMINMAXINFO {
             let sizing = &mut *(lparam.0 as *mut MINMAXINFO);
-            sizing.ptMinTrackSize.x = scale(410, state.dpi_scale);
-            sizing.ptMinTrackSize.y = scale(390, state.dpi_scale);
+            sizing.ptMinTrackSize.x = scale(320, state.dpi_scale);
+            sizing.ptMinTrackSize.y = scale(330, state.dpi_scale);
             return LRESULT(0);
         }
         if message == WM_NCHITTEST {
@@ -200,7 +204,7 @@ pub(crate) unsafe extern "system" fn window_proc(
         match message {
             WM_SIZE => {
                 layout_controls(window, state);
-                if !state.settings_open
+                if state.active_panel == ActivePanel::Clicker
                     && state.preview_source.is_some()
                     && let Err(error) = state.update_preview_bitmap(window)
                 {
@@ -260,8 +264,29 @@ pub(crate) unsafe extern "system" fn window_proc(
                     state.stop();
                 } else if id == ID_CLOSE {
                     let _ = PostMessageW(Some(window), WM_CLOSE, WPARAM(0), LPARAM(0));
+                } else if id == ID_CLICKER_BUTTON {
+                    if state.active_panel == ActivePanel::Clicker {
+                        state.set_panel(window, ActivePanel::MainMenu);
+                    } else {
+                        state.set_panel(window, ActivePanel::Clicker);
+                    }
                 } else if id == ID_SETTINGS {
-                    state.set_settings_open(window, !state.settings_open);
+                    if state.active_panel == ActivePanel::Settings {
+                        state.set_panel(window, ActivePanel::MainMenu);
+                    } else {
+                        state.set_panel(window, ActivePanel::Settings);
+                    }
+                } else if id == super::logic_gui::ID_LOGIC_BUTTON {
+                    if state.active_panel == ActivePanel::Logic {
+                        state.set_panel(window, ActivePanel::MainMenu);
+                    } else {
+                        state.set_panel(window, ActivePanel::Logic);
+                    }
+                } else if (super::logic_gui::ID_LOGIC_ADD_CLICK_BTN
+                    ..=super::logic_gui::ID_LOGIC_LOAD_BTN)
+                    .contains(&id)
+                {
+                    state.handle_logic_command(window, id);
                 } else if id == ID_ALWAYS_ON_TOP {
                     let checked = SendMessageW(
                         state.always_on_top_checkbox,
@@ -312,6 +337,19 @@ pub(crate) unsafe extern "system" fn window_proc(
                     .0;
                     if let Ok(selection) = usize::try_from(selection) {
                         state.set_image_count(window, selection + 1);
+                    }
+                }
+                LRESULT(0)
+            }
+            WM_NOTIFY => {
+                let nmhdr = &*(lparam.0 as *const NMHDR);
+                if nmhdr.idFrom == super::logic_gui::ID_LOGIC_TREE_VIEW
+                    && nmhdr.code == TVN_SELCHANGEDW
+                {
+                    let tv = &*(lparam.0 as *const NMTREEVIEWW);
+                    let node_id = tv.itemNew.lParam.0 as usize;
+                    if node_id != 0 {
+                        state.handle_logic_tree_selchanged(node_id);
                     }
                 }
                 LRESULT(0)
@@ -369,6 +407,7 @@ pub(crate) unsafe extern "system" fn window_proc(
                         state.status_label,
                         &format!("Clicks: {clicks} | Scan: {scan_ms:.2} ms"),
                     );
+                    state.update_menu_summary();
                 }
                 LRESULT(0)
             }
