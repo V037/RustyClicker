@@ -9,8 +9,8 @@ before acting: release details and working-tree state can change.
 - Repository: `V037/RustyClicker`
 - Main development branch: `rust_impl`
 - The legacy `opencv_version` branch has been deleted both locally and remotely on GitHub.
-- Current release tag: **v1.3.1 (Stable)**
-- GitHub release: <https://github.com/V037/RustyClicker/releases/tag/v1.3.1>
+- Current release tag: **v1.3.2 (Stable)**
+- GitHub release: <https://github.com/V037/RustyClicker/releases/tag/v1.3.2>
 - Binary target: Native Windows x64 executable, size ~836 KB (< 1 MB).
 - GUI Framework Decision: Retained native Win32 API (`windows-rs`) instead of `egui` to strictly satisfy the < 1 MB size budget and zero GPU gaming overhead.
 
@@ -104,3 +104,4 @@ The compiled release executable is located at `target\release\RustyClicker.exe`.
 - **v1.2.2 (Beta)**: Relocated clicker controls into a dedicated panel, transformed main menu into a System Overview dashboard, non-overlapping header layout, compact window resizing (320×330), always-on-top button relocation, and adoption of PolyForm Noncommercial License 1.0.0.
 - **v1.3.0 (Experimental)**: Added GPU-accelerated DirectX 11 / DXGI Desktop Duplication capture engine (`dxgi.rs`) with sub-millisecond texture staging, automatic multi-monitor display prioritization, seamless GDI `BitBlt` fallback, and graceful `NoCandidates` scanner loop handling.
 - **v1.3.1 (Stable)**: Added ultra-fast Classical Autoclicker with millisecond delay and button choice, interactive single-keypress global hotkey remapping in Settings, stealth mode ("Hide when active"), DPI-aware vector gear icon, grouped navigation buttons, context-sensitive start hotkey guard, dynamic hotkey tips/labels, and classical status label palette theming.
+- **v1.3.2 (Stable)**: Adjusted default initial launch window dimensions to 360×330 px with dedicated `DEFAULT_WINDOW_*` and `MIN_WINDOW_*` constants while preserving the compact 320×330 px minimum resize tracking limits.

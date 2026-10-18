@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.3.2] - 2026-10-18 (Stable)
+
+### Changed
+
+- **Compact Default Window Sizing**: Set default launch dimensions to an ergonomic `360 × 330 px` (`DEFAULT_WINDOW_WIDTH` and `DEFAULT_WINDOW_HEIGHT`), while preserving the compact `320 × 330 px` minimum resize tracking limits.
+
 ## [1.3.1] - 2026-10-18 (Stable)
 
 > **Note:** This is a stable release introducing the Classical Autoclicker, dynamic hotkey remapping, and UI refinements.

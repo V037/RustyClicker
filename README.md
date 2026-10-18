@@ -2,7 +2,7 @@
 
 # RustyClicker  <img alt="GitHub code size in bytes" src="https://img.shields.io/github/languages/code-size/V037/RustyClicker"> ![Lines of Code](./output/badge.svg)
 
-**Version:** v1.3.1 (Stable)
+**Version:** v1.3.2 (Stable)
 
 RustyClicker is a lightweight Windows autoclicker written in Rust. It provides both
 an ultra-fast **Classical Autoclicker** (direct hardware mouse clicking at current cursor position)

@@ -1,5 +1,8 @@
 use crate::core::CoreError;
-use crate::gui::{Preferences, Theme, scale};
+use crate::gui::{
+    DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, Preferences,
+    Theme, scale,
+};
 use crate::input::ClickButton;
 use crate::matching::{
     DEFAULT_CLICK_DELAY_MS, DEFAULT_MATCH_THREADS, MATCH_THREAD_OPTIONS, MAX_CLICK_DELAY_MS,
@@ -422,6 +425,14 @@ fn match_thread_options_and_saved_values_are_validated() {
 fn ui_dimensions_scale_with_windows_dpi() {
     assert_eq!(scale(100, 1.0), 100);
     assert_eq!(scale(100, 1.5), 150);
+    assert_eq!(DEFAULT_WINDOW_WIDTH, 360);
+    assert_eq!(DEFAULT_WINDOW_HEIGHT, 330);
+    assert_eq!(MIN_WINDOW_WIDTH, 320);
+    assert_eq!(MIN_WINDOW_HEIGHT, 330);
+    assert_eq!(scale(DEFAULT_WINDOW_WIDTH, 1.0), 360);
+    assert_eq!(scale(DEFAULT_WINDOW_HEIGHT, 1.0), 330);
+    assert_eq!(scale(MIN_WINDOW_WIDTH, 1.0), 320);
+    assert_eq!(scale(MIN_WINDOW_HEIGHT, 1.0), 330);
 }
 
 #[test]

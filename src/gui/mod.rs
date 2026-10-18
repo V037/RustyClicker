@@ -36,6 +36,10 @@ use windows::{
 
 pub(crate) const WINDOW_CLASS: PCWSTR = w!("RustImageClickerWindow");
 pub(crate) const WINDOW_TITLE: PCWSTR = w!("RustyClicker");
+pub(crate) const DEFAULT_WINDOW_WIDTH: i32 = 360;
+pub(crate) const DEFAULT_WINDOW_HEIGHT: i32 = 330;
+pub(crate) const MIN_WINDOW_WIDTH: i32 = 320;
+pub(crate) const MIN_WINDOW_HEIGHT: i32 = 330;
 pub(crate) const MAX_IMAGE_COUNT: usize = 99;
 pub(crate) const TIMER_ID: usize = 1;
 pub(crate) const ID_START: usize = 10;
@@ -160,8 +164,8 @@ pub(crate) fn run() {
             WS_POPUP | WS_THICKFRAME | WS_CLIPCHILDREN | WS_VISIBLE,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            layout::scale(450, initial_scale),
-            layout::scale(470, initial_scale),
+            layout::scale(DEFAULT_WINDOW_WIDTH, initial_scale),
+            layout::scale(DEFAULT_WINDOW_HEIGHT, initial_scale),
             None,
             None,
             Some(instance),

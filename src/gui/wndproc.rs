@@ -8,7 +8,7 @@ use super::{
     ID_HOTKEY_STOP_LABEL, ID_IMAGES_NAV_BUTTON, ID_MENU_HOTKEY_LABEL, ID_MENU_STATUS_TITLE,
     ID_MENU_TIPS_LABEL, ID_PREVIEW_LABEL, ID_SELECT_IMAGE, ID_SETTINGS, ID_SETTINGS_HEADING,
     ID_SLOT_COMBO, ID_SLOT_COUNT_INPUT, ID_SLOT_LABEL, ID_START, ID_STATUS_LABEL, ID_STOP,
-    ID_THEME_COMBO, ID_THREAD_COUNT_COMBO, TIMER_ID,
+    ID_THEME_COMBO, ID_THREAD_COUNT_COMBO, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, TIMER_ID,
     controls::create_controls,
     drawing::{draw_button, draw_cursor_icon, draw_empty_preview},
     layout::{layout_controls, scale, update_ui_font},
@@ -210,8 +210,8 @@ pub(crate) unsafe extern "system" fn window_proc(
         }
         if message == WM_GETMINMAXINFO {
             let sizing = &mut *(lparam.0 as *mut MINMAXINFO);
-            sizing.ptMinTrackSize.x = scale(320, state.dpi_scale);
-            sizing.ptMinTrackSize.y = scale(330, state.dpi_scale);
+            sizing.ptMinTrackSize.x = scale(MIN_WINDOW_WIDTH, state.dpi_scale);
+            sizing.ptMinTrackSize.y = scale(MIN_WINDOW_HEIGHT, state.dpi_scale);
             return LRESULT(0);
         }
         if message == WM_NCHITTEST {
