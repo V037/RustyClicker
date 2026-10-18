@@ -89,3 +89,10 @@ finishes in 10 ms.
 ## Credits
 
 Created by **V037_**.
+
+## License
+
+This project is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE).
+
+- **Permitted**: You are free to view, compile, study, modify, and run this software for personal, educational, research, hobby, and non-commercial purposes.
+- **Prohibited**: Commercial use, commercial redistribution, and selling copies of this software or derivative works are strictly forbidden without explicit written permission from the copyright holder.

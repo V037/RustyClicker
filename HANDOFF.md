@@ -49,6 +49,7 @@ statistics, and an isolated Behavior Tree Logic Builder panel.
 - Click interval accepts integer values from **1 to 10,000 ms**, default **100 ms**.
 - Preferences are saved as `%APPDATA%\RustyClicker\rusty_clicker.json`, falling back to `%LOCALAPPDATA%`.
 - Release builds are optimized, use LTO, one codegen unit, and strip symbols.
+- License: PolyForm Noncommercial License 1.0.0 (`PolyForm-Noncommercial-1.0.0`), permitting personal/hobbyist/educational use while strictly forbidding commercial sale and unauthorized redistribution.
 
 ## Build and validation
 

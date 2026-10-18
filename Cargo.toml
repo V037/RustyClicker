@@ -2,6 +2,8 @@
 name = "rusty-clicker"
 version = "1.2.2"
 edition = "2024"
+authors = ["Valentino"]
+license = "PolyForm-Noncommercial-1.0.0"
 build = "build.rs"
 
 [[bin]]
