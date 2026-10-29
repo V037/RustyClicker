@@ -6,9 +6,20 @@ authors = ["Valentino"]
 license = "PolyForm-Noncommercial-1.0.0"
 build = "build.rs"
 
+[lib]
+name = "rusty_clicker"
+path = "src/lib.rs"
+crate-type = ["rlib"]
+
 [[bin]]
 name = "RustyClicker"
 path = "src/main.rs"
+
+[workspace]
+members = [
+    ".",
+    "py",
+]
 
 [dependencies]
 corrmatch = { version = "0.2.5", features = ["rayon", "simd"] }
@@ -32,6 +43,12 @@ windows = { version = "0.62.2", features = [
     "Win32_UI_HiDpi",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
+    "Media_Ocr",
+    "Graphics_Imaging",
+    "Storage_Streams",
+    "Foundation",
+    "Foundation_Collections",
+    "Globalization",
 ] }
 
 [profile.release]

@@ -21,15 +21,43 @@ pub(crate) enum Theme {
     Purple,
 }
 
-use crate::input::ClickButton;
+use crate::input::{ClickButton, ClickType};
 
-pub(crate) const DEFAULT_CLASSICAL_DELAY_MS: u64 = 50;
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ClassicalRepeatMode {
+    #[default]
+    UntilStopped,
+    Count,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ClassicalLocationMode {
+    #[default]
+    Current,
+    Pick,
+}
+
+pub(crate) const DEFAULT_CLASSICAL_DELAY_MS: u64 = 100;
 pub(crate) const DEFAULT_START_HOTKEY: u32 = 0x70; // VK_F1
 pub(crate) const DEFAULT_STOP_HOTKEY: u32 = 0x71; // VK_F2
 pub(crate) const DEFAULT_CLOSE_HOTKEY: u32 = 0x72; // VK_F3
 
 pub(crate) const fn default_classical_delay_ms() -> u64 {
     DEFAULT_CLASSICAL_DELAY_MS
+}
+
+pub(crate) const fn default_classical_millis() -> u32 {
+    100
+}
+
+pub(crate) const fn default_classical_random_offset() -> u32 {
+    40
+}
+
+pub(crate) const fn default_classical_repeat_count() -> u64 {
+    1
 }
 
 pub(crate) const fn default_start_hotkey() -> u32 {
@@ -108,6 +136,30 @@ pub(crate) struct Preferences {
     pub(crate) classical_delay_ms: u64,
     #[serde(default)]
     pub(crate) classical_button: ClickButton,
+    #[serde(default)]
+    pub(crate) classical_hours: u32,
+    #[serde(default)]
+    pub(crate) classical_mins: u32,
+    #[serde(default)]
+    pub(crate) classical_secs: u32,
+    #[serde(default = "default_classical_millis")]
+    pub(crate) classical_millis: u32,
+    #[serde(default)]
+    pub(crate) classical_random_offset_enabled: bool,
+    #[serde(default = "default_classical_random_offset")]
+    pub(crate) classical_random_offset_ms: u32,
+    #[serde(default)]
+    pub(crate) classical_click_type: ClickType,
+    #[serde(default)]
+    pub(crate) classical_repeat_mode: ClassicalRepeatMode,
+    #[serde(default = "default_classical_repeat_count")]
+    pub(crate) classical_repeat_count: u64,
+    #[serde(default)]
+    pub(crate) classical_location_mode: ClassicalLocationMode,
+    #[serde(default)]
+    pub(crate) classical_pick_x: i32,
+    #[serde(default)]
+    pub(crate) classical_pick_y: i32,
     #[serde(default = "default_start_hotkey")]
     pub(crate) start_hotkey: u32,
     #[serde(default = "default_stop_hotkey")]
@@ -129,6 +181,18 @@ impl Default for Preferences {
             image_count: default_image_count(),
             classical_delay_ms: default_classical_delay_ms(),
             classical_button: ClickButton::default(),
+            classical_hours: 0,
+            classical_mins: 0,
+            classical_secs: 0,
+            classical_millis: default_classical_millis(),
+            classical_random_offset_enabled: false,
+            classical_random_offset_ms: default_classical_random_offset(),
+            classical_click_type: ClickType::default(),
+            classical_repeat_mode: ClassicalRepeatMode::default(),
+            classical_repeat_count: default_classical_repeat_count(),
+            classical_location_mode: ClassicalLocationMode::default(),
+            classical_pick_x: 0,
+            classical_pick_y: 0,
             start_hotkey: default_start_hotkey(),
             stop_hotkey: default_stop_hotkey(),
             close_hotkey: default_close_hotkey(),
@@ -213,6 +277,18 @@ impl AppState {
         self.image_count = preferences.image_count.clamp(1, MAX_IMAGE_COUNT);
         self.classical_delay_ms = normalize_classical_delay_ms(preferences.classical_delay_ms);
         self.classical_button = preferences.classical_button;
+        self.classical_hours = preferences.classical_hours;
+        self.classical_mins = preferences.classical_mins;
+        self.classical_secs = preferences.classical_secs;
+        self.classical_millis = preferences.classical_millis;
+        self.classical_random_offset_enabled = preferences.classical_random_offset_enabled;
+        self.classical_random_offset_ms = preferences.classical_random_offset_ms;
+        self.classical_click_type = preferences.classical_click_type;
+        self.classical_repeat_mode = preferences.classical_repeat_mode;
+        self.classical_repeat_count = preferences.classical_repeat_count;
+        self.classical_location_mode = preferences.classical_location_mode;
+        self.classical_pick_x = preferences.classical_pick_x;
+        self.classical_pick_y = preferences.classical_pick_y;
         self.start_hotkey = preferences.start_hotkey;
         self.stop_hotkey = preferences.stop_hotkey;
         self.close_hotkey = preferences.close_hotkey;
@@ -262,6 +338,18 @@ impl AppState {
             image_count: self.image_count,
             classical_delay_ms: self.classical_delay_ms,
             classical_button: self.classical_button,
+            classical_hours: self.classical_hours,
+            classical_mins: self.classical_mins,
+            classical_secs: self.classical_secs,
+            classical_millis: self.classical_millis,
+            classical_random_offset_enabled: self.classical_random_offset_enabled,
+            classical_random_offset_ms: self.classical_random_offset_ms,
+            classical_click_type: self.classical_click_type,
+            classical_repeat_mode: self.classical_repeat_mode,
+            classical_repeat_count: self.classical_repeat_count,
+            classical_location_mode: self.classical_location_mode,
+            classical_pick_x: self.classical_pick_x,
+            classical_pick_y: self.classical_pick_y,
             start_hotkey: self.start_hotkey,
             stop_hotkey: self.stop_hotkey,
             close_hotkey: self.close_hotkey,

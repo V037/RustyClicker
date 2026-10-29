@@ -253,11 +253,21 @@ fn layout_classical_controls(
     s: f32,
     state: &AppState,
 ) {
-    let status_h = scale(20, s);
-    let status_y = height - scale(24, s);
+    let status_h = scale(18, s);
+    let status_y = height - scale(22, s);
 
-    let action_h = scale(30, s);
-    let action_y = status_y - action_h - scale(4, s);
+    let checkbox_h = scale(20, s);
+    let checkbox_y = status_y - checkbox_h - scale(2, s);
+    move_control(
+        state.classical_always_on_top_checkbox,
+        margin,
+        checkbox_y,
+        content_width,
+        checkbox_h,
+    );
+
+    let action_h = scale(28, s);
+    let action_y = checkbox_y - action_h - scale(4, s);
     let action_gap = scale(5, s);
     let button_width = (content_width - action_gap * 2) / 3;
     let button_width_last = content_width - (button_width + action_gap) * 2;
@@ -284,14 +294,14 @@ fn layout_classical_controls(
         action_h,
     );
 
-    let checkbox_h = scale(22, s);
-    let checkbox_y = action_y - checkbox_h - scale(4, s);
+    let stats_h = scale(18, s);
+    let stats_y = action_y - stats_h - scale(4, s);
     move_control(
-        state.classical_always_on_top_checkbox,
+        state.classical_stats_label,
         margin,
-        checkbox_y,
+        stats_y,
         content_width,
-        checkbox_h,
+        stats_h,
     );
 
     move_control(
@@ -302,61 +312,268 @@ fn layout_classical_controls(
         status_h,
     );
 
-    let top_y = scale(52, s);
+    // Hide old title and subtitle to maximize space
+    move_control(state.classical_title, margin, 0, 0, 0);
+    move_control(state.classical_subtitle, margin, 0, 0, 0);
+
+    // Section 1: Click interval
+    let sec1_y = scale(46, s);
     move_control(
-        state.classical_title,
+        state.classical_delay_label,
         margin,
-        top_y,
-        content_width,
-        scale(22, s),
-    );
-    move_control(
-        state.classical_subtitle,
-        margin,
-        top_y + scale(22, s),
+        sec1_y,
         content_width,
         scale(18, s),
     );
 
-    let delay_lbl_y = top_y + scale(46, s);
+    let input_y = sec1_y + scale(20, s);
+    let edit_h = scale(22, s);
+    let num_w = scale(34, s);
+
+    let mut cur_x = margin;
+    // Hours
+    move_control(state.classical_hours_input, cur_x, input_y, num_w, edit_h);
+    cur_x += num_w + scale(4, s);
+    let h_lbl_w = scale(34, s);
     move_control(
-        state.classical_delay_label,
-        margin,
-        delay_lbl_y,
-        scale(260, s),
-        scale(20, s),
+        state.classical_hours_label,
+        cur_x,
+        input_y + scale(2, s),
+        h_lbl_w,
+        scale(18, s),
     );
+    cur_x += h_lbl_w + scale(6, s);
+
+    // Mins
+    move_control(state.classical_mins_input, cur_x, input_y, num_w, edit_h);
+    cur_x += num_w + scale(4, s);
+    let m_lbl_w = scale(28, s);
     move_control(
-        state.classical_delay_input,
-        margin,
-        delay_lbl_y + scale(20, s),
-        scale(200, s),
-        scale(26, s),
+        state.classical_mins_label,
+        cur_x,
+        input_y + scale(2, s),
+        m_lbl_w,
+        scale(18, s),
+    );
+    cur_x += m_lbl_w + scale(6, s);
+
+    // Secs
+    move_control(state.classical_secs_input, cur_x, input_y, num_w, edit_h);
+    cur_x += num_w + scale(4, s);
+    let s_lbl_w = scale(28, s);
+    move_control(
+        state.classical_secs_label,
+        cur_x,
+        input_y + scale(2, s),
+        s_lbl_w,
+        scale(18, s),
+    );
+    cur_x += s_lbl_w + scale(6, s);
+
+    // Millis
+    let ms_w = scale(42, s);
+    move_control(state.classical_millis_input, cur_x, input_y, ms_w, edit_h);
+    cur_x += ms_w + scale(4, s);
+    let ms_lbl_w = (content_width - (cur_x - margin)).max(scale(60, s));
+    move_control(
+        state.classical_millis_label,
+        cur_x,
+        input_y + scale(2, s),
+        ms_lbl_w,
+        scale(18, s),
     );
 
-    let btn_lbl_y = delay_lbl_y + scale(52, s);
+    // Random offset
+    let rand_y = input_y + scale(26, s);
+    let rand_chk_w = scale(116, s);
+    move_control(
+        state.classical_random_checkbox,
+        margin,
+        rand_y,
+        rand_chk_w,
+        scale(20, s),
+    );
+    let rand_input_x = margin + rand_chk_w + scale(4, s);
+    let rand_num_w = scale(38, s);
+    move_control(
+        state.classical_random_input,
+        rand_input_x,
+        rand_y,
+        rand_num_w,
+        edit_h,
+    );
+    let rand_lbl_x = rand_input_x + rand_num_w + scale(4, s);
+    move_control(
+        state.classical_random_label,
+        rand_lbl_x,
+        rand_y + scale(2, s),
+        scale(90, s),
+        scale(18, s),
+    );
+
+    // Section 2 & 3: Two Columns (Click options & Click repeat)
+    let col_gap = scale(10, s);
+    let col_w = (content_width - col_gap) / 2;
+    let col2_x = margin + col_w + col_gap;
+    let sec2_y = rand_y + scale(26, s);
+
+    // Left Column: Click options
+    move_control(
+        state.classical_options_title,
+        margin,
+        sec2_y,
+        col_w,
+        scale(18, s),
+    );
+    let opt_row1_y = sec2_y + scale(18, s);
+    let opt_lbl_w = scale(78, s);
+    let opt_ctrl_w = (col_w - opt_lbl_w).max(scale(60, s));
     move_control(
         state.classical_button_label,
         margin,
-        btn_lbl_y,
-        scale(260, s),
-        scale(20, s),
+        opt_row1_y + scale(2, s),
+        opt_lbl_w,
+        scale(18, s),
     );
     move_control(
         state.classical_button_combo,
-        margin,
-        btn_lbl_y + scale(20, s),
-        scale(200, s),
+        margin + opt_lbl_w,
+        opt_row1_y,
+        opt_ctrl_w,
         scale(100, s),
     );
 
-    let stats_y = btn_lbl_y + scale(54, s);
+    let opt_row2_y = opt_row1_y + scale(25, s);
     move_control(
-        state.classical_stats_label,
+        state.classical_click_type_label,
         margin,
-        stats_y,
+        opt_row2_y + scale(2, s),
+        opt_lbl_w,
+        scale(18, s),
+    );
+    move_control(
+        state.classical_click_type_combo,
+        margin + opt_lbl_w,
+        opt_row2_y,
+        opt_ctrl_w,
+        scale(100, s),
+    );
+
+    // Right Column: Click repeat
+    move_control(
+        state.classical_repeat_title,
+        col2_x,
+        sec2_y,
+        col_w,
+        scale(18, s),
+    );
+    let rpt_radio_w = scale(56, s);
+    move_control(
+        state.classical_repeat_count_radio,
+        col2_x,
+        opt_row1_y,
+        rpt_radio_w,
+        scale(20, s),
+    );
+    let rpt_input_x = col2_x + rpt_radio_w + scale(2, s);
+    let rpt_input_w = scale(34, s);
+    move_control(
+        state.classical_repeat_count_input,
+        rpt_input_x,
+        opt_row1_y,
+        rpt_input_w,
+        edit_h,
+    );
+    let rpt_lbl_x = rpt_input_x + rpt_input_w + scale(4, s);
+    move_control(
+        state.classical_repeat_count_label,
+        rpt_lbl_x,
+        opt_row1_y + scale(2, s),
+        scale(36, s),
+        scale(18, s),
+    );
+
+    move_control(
+        state.classical_repeat_stopped_radio,
+        col2_x,
+        opt_row2_y,
+        col_w,
+        scale(20, s),
+    );
+
+    // Section 4: Cursor position
+    let sec4_y = opt_row2_y + scale(27, s);
+    move_control(
+        state.classical_location_title,
+        margin,
+        sec4_y,
         content_width,
+        scale(18, s),
+    );
+
+    let loc_row_y = sec4_y + scale(18, s);
+    let cur_loc_w = scale(108, s);
+    move_control(
+        state.classical_location_current_radio,
+        margin,
+        loc_row_y,
+        cur_loc_w,
         scale(22, s),
+    );
+
+    let pick_rad_x = margin + cur_loc_w + scale(4, s);
+    let pick_rad_w = scale(16, s);
+    move_control(
+        state.classical_location_pick_radio,
+        pick_rad_x,
+        loc_row_y,
+        pick_rad_w,
+        scale(22, s),
+    );
+
+    let pick_btn_x = pick_rad_x + pick_rad_w + scale(2, s);
+    let pick_btn_w = scale(86, s);
+    move_control(
+        state.classical_pick_button,
+        pick_btn_x,
+        loc_row_y,
+        pick_btn_w,
+        scale(22, s),
+    );
+
+    let coord_w = scale(34, s);
+    let x_lbl_x = pick_btn_x + pick_btn_w + scale(6, s);
+    move_control(
+        state.classical_pick_x_label,
+        x_lbl_x,
+        loc_row_y + scale(2, s),
+        scale(12, s),
+        scale(18, s),
+    );
+    let x_inp_x = x_lbl_x + scale(14, s);
+    move_control(
+        state.classical_pick_x_input,
+        x_inp_x,
+        loc_row_y,
+        coord_w,
+        edit_h,
+    );
+
+    let y_lbl_x = x_inp_x + coord_w + scale(6, s);
+    move_control(
+        state.classical_pick_y_label,
+        y_lbl_x,
+        loc_row_y + scale(2, s),
+        scale(12, s),
+        scale(18, s),
+    );
+    let y_inp_x = y_lbl_x + scale(14, s);
+    move_control(
+        state.classical_pick_y_input,
+        y_inp_x,
+        loc_row_y,
+        coord_w,
+        edit_h,
     );
 }
 

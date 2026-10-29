@@ -1,3 +1,3 @@
-pub(crate) mod dxgi;
-pub(crate) mod screen;
-pub(crate) use screen::capture_screen;
+pub mod dxgi;
+pub mod screen;
+pub use screen::{GdiCapture, ScreenCapture, capture_screen, capture_screen_bgra, crop_bgra};

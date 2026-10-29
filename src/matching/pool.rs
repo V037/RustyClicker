@@ -3,19 +3,19 @@ use rayon::{ThreadPool, ThreadPoolBuilder};
 use std::sync::OnceLock;
 use std::time::Duration;
 
-pub(crate) const MATCH_CONFIDENCE: f32 = 0.90;
-pub(crate) const SCAN_INTERVAL: Duration = Duration::from_millis(10);
-pub(crate) const MATCH_THREAD_OPTIONS: [usize; 4] = [1, 2, 4, 8];
-pub(crate) const DEFAULT_MATCH_THREADS: usize = 2;
-pub(crate) const DEFAULT_CLICK_DELAY_MS: u64 = 100;
-pub(crate) const MIN_CLICK_DELAY_MS: u64 = 1;
-pub(crate) const MAX_CLICK_DELAY_MS: u64 = 10_000;
+pub const MATCH_CONFIDENCE: f32 = 0.90;
+pub const SCAN_INTERVAL: Duration = Duration::from_millis(10);
+pub const MATCH_THREAD_OPTIONS: [usize; 4] = [1, 2, 4, 8];
+pub const DEFAULT_MATCH_THREADS: usize = 2;
+pub const DEFAULT_CLICK_DELAY_MS: u64 = 100;
+pub const MIN_CLICK_DELAY_MS: u64 = 1;
+pub const MAX_CLICK_DELAY_MS: u64 = 10_000;
 
-pub(crate) fn default_click_delay_ms() -> u64 {
+pub fn default_click_delay_ms() -> u64 {
     DEFAULT_CLICK_DELAY_MS
 }
 
-pub(crate) fn normalize_click_delay_ms(delay: u64) -> u64 {
+pub fn normalize_click_delay_ms(delay: u64) -> u64 {
     if (MIN_CLICK_DELAY_MS..=MAX_CLICK_DELAY_MS).contains(&delay) {
         delay
     } else {
@@ -23,7 +23,7 @@ pub(crate) fn normalize_click_delay_ms(delay: u64) -> u64 {
     }
 }
 
-pub(crate) fn normalize_match_threads(threads: usize) -> usize {
+pub fn normalize_match_threads(threads: usize) -> usize {
     if MATCH_THREAD_OPTIONS.contains(&threads) {
         threads
     } else {

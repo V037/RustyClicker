@@ -7,7 +7,7 @@ use windows::Win32::Graphics::Dxgi::Common::*;
 use windows::Win32::Graphics::Dxgi::*;
 use windows::core::Interface;
 
-pub(crate) struct DxgiCapture {
+pub struct DxgiCapture {
     device: ID3D11Device,
     context: ID3D11DeviceContext,
     duplication: IDXGIOutputDuplication,
@@ -218,6 +218,82 @@ impl DxgiCapture {
                         )));
                     }
                     // Frame hasn't changed; existing grayscale buffer is valid
+                }
+                Err(e) => {
+                    return Err(CoreError::ScreenCapture(Box::new(
+                        CoreError::CaptureBitmap(e.to_string()),
+                    )));
+                }
+            }
+
+            Ok((self.width, self.height, self.origin_x, self.origin_y))
+        }
+    }
+
+    pub fn capture_bgra(
+        &mut self,
+        bgra: &mut Vec<u8>,
+    ) -> Result<(u32, u32, i32, i32), CoreError> {
+        let staging_texture = self.ensure_staging_texture()?.clone();
+
+        unsafe {
+            let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
+            let mut resource = None;
+
+            let timeout = if self.has_valid_frame { 10 } else { 50 };
+            let acquire_result =
+                self.duplication
+                    .AcquireNextFrame(timeout, &mut frame_info, &mut resource);
+
+            match acquire_result {
+                Ok(()) => {
+                    let Some(desktop_resource) = resource else {
+                        let _ = self.duplication.ReleaseFrame();
+                        return Ok((self.width, self.height, self.origin_x, self.origin_y));
+                    };
+                    let desktop_texture: ID3D11Texture2D =
+                        desktop_resource.cast().map_err(|e| {
+                            let _ = self.duplication.ReleaseFrame();
+                            CoreError::ScreenCapture(Box::new(CoreError::CaptureBitmap(
+                                e.to_string(),
+                            )))
+                        })?;
+
+                    self.context
+                        .CopyResource(&staging_texture, &desktop_texture);
+                    let _ = self.duplication.ReleaseFrame();
+
+                    let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+                    self.context
+                        .Map(&staging_texture, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+                        .map_err(|e| {
+                            CoreError::ScreenCapture(Box::new(CoreError::CaptureBitmap(
+                                e.to_string(),
+                            )))
+                        })?;
+
+                    let row_pitch = mapped.RowPitch as usize;
+                    let width = self.width as usize;
+                    let height = self.height as usize;
+                    bgra.resize(width * height * 4, 0);
+
+                    let src_ptr = mapped.pData as *const u8;
+                    for y in 0..height {
+                        let row_src =
+                            std::slice::from_raw_parts(src_ptr.add(y * row_pitch), width * 4);
+                        let row_dst = &mut bgra[y * width * 4..(y + 1) * width * 4];
+                        row_dst.copy_from_slice(row_src);
+                    }
+
+                    self.context.Unmap(&staging_texture, 0);
+                    self.has_valid_frame = true;
+                }
+                Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => {
+                    if !self.has_valid_frame {
+                        return Err(CoreError::ScreenCapture(Box::new(
+                            CoreError::CaptureBitmap("DXGI initial frame timeout".to_owned()),
+                        )));
+                    }
                 }
                 Err(e) => {
                     return Err(CoreError::ScreenCapture(Box::new(

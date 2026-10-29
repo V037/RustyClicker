@@ -314,7 +314,7 @@ fn old_preferences_use_default_click_delay_and_theme() {
     assert_eq!(defaults.click_delay_ms, DEFAULT_CLICK_DELAY_MS);
     assert_eq!(defaults.match_threads, DEFAULT_MATCH_THREADS);
     assert_eq!(defaults.image_count, 3);
-    assert_eq!(defaults.classical_delay_ms, 50);
+    assert_eq!(defaults.classical_delay_ms, 100);
     assert_eq!(defaults.classical_button, ClickButton::Left);
     assert_eq!(defaults.start_hotkey, 0x70);
     assert_eq!(defaults.stop_hotkey, 0x71);
@@ -333,6 +333,18 @@ fn selected_settings_round_trip_through_preferences() {
         image_count: 37,
         classical_delay_ms: 25,
         classical_button: ClickButton::Right,
+        classical_hours: 1,
+        classical_mins: 2,
+        classical_secs: 3,
+        classical_millis: 456,
+        classical_random_offset_enabled: true,
+        classical_random_offset_ms: 25,
+        classical_click_type: crate::input::ClickType::Double,
+        classical_repeat_mode: crate::gui::preferences::ClassicalRepeatMode::Count,
+        classical_repeat_count: 42,
+        classical_location_mode: crate::gui::preferences::ClassicalLocationMode::Pick,
+        classical_pick_x: 100,
+        classical_pick_y: 200,
         start_hotkey: 0x73,
         stop_hotkey: 0x74,
         close_hotkey: 0x75,
@@ -346,6 +358,27 @@ fn selected_settings_round_trip_through_preferences() {
     assert_eq!(decoded.image_count, 37);
     assert_eq!(decoded.classical_delay_ms, 25);
     assert_eq!(decoded.classical_button, ClickButton::Right);
+    assert_eq!(decoded.classical_hours, 1);
+    assert_eq!(decoded.classical_mins, 2);
+    assert_eq!(decoded.classical_secs, 3);
+    assert_eq!(decoded.classical_millis, 456);
+    assert!(decoded.classical_random_offset_enabled);
+    assert_eq!(decoded.classical_random_offset_ms, 25);
+    assert_eq!(
+        decoded.classical_click_type,
+        crate::input::ClickType::Double
+    );
+    assert_eq!(
+        decoded.classical_repeat_mode,
+        crate::gui::preferences::ClassicalRepeatMode::Count
+    );
+    assert_eq!(decoded.classical_repeat_count, 42);
+    assert_eq!(
+        decoded.classical_location_mode,
+        crate::gui::preferences::ClassicalLocationMode::Pick
+    );
+    assert_eq!(decoded.classical_pick_x, 100);
+    assert_eq!(decoded.classical_pick_y, 200);
     assert_eq!(decoded.start_hotkey, 0x73);
     assert_eq!(decoded.stop_hotkey, 0x74);
     assert_eq!(decoded.close_hotkey, 0x75);
@@ -426,13 +459,85 @@ fn ui_dimensions_scale_with_windows_dpi() {
     assert_eq!(scale(100, 1.0), 100);
     assert_eq!(scale(100, 1.5), 150);
     assert_eq!(DEFAULT_WINDOW_WIDTH, 360);
-    assert_eq!(DEFAULT_WINDOW_HEIGHT, 330);
-    assert_eq!(MIN_WINDOW_WIDTH, 320);
-    assert_eq!(MIN_WINDOW_HEIGHT, 330);
+    assert_eq!(DEFAULT_WINDOW_HEIGHT, 440);
+    assert_eq!(MIN_WINDOW_WIDTH, 330);
+    assert_eq!(MIN_WINDOW_HEIGHT, 380);
     assert_eq!(scale(DEFAULT_WINDOW_WIDTH, 1.0), 360);
-    assert_eq!(scale(DEFAULT_WINDOW_HEIGHT, 1.0), 330);
-    assert_eq!(scale(MIN_WINDOW_WIDTH, 1.0), 320);
-    assert_eq!(scale(MIN_WINDOW_HEIGHT, 1.0), 330);
+    assert_eq!(scale(DEFAULT_WINDOW_HEIGHT, 1.0), 440);
+    assert_eq!(scale(MIN_WINDOW_WIDTH, 1.0), 330);
+    assert_eq!(scale(MIN_WINDOW_HEIGHT, 1.0), 380);
+}
+
+#[test]
+fn classical_click_type_names() {
+    assert_eq!(crate::input::ClickType::Single.name(), "Single");
+    assert_eq!(crate::input::ClickType::Double.name(), "Double");
+    assert_eq!(
+        crate::input::ClickType::default(),
+        crate::input::ClickType::Single
+    );
+}
+
+#[test]
+fn classical_fast_rng_generates_within_bounds() {
+    let mut rng = crate::classical_worker::FastRng::new();
+    for _ in 0..100 {
+        let val = rng.gen_range(-40, 40);
+        assert!((-40..=40).contains(&val));
+    }
+    assert_eq!(rng.gen_range(10, 10), 10);
+    assert_eq!(rng.gen_range(20, 10), 20);
+}
+
+#[test]
+fn classical_worker_config_initialization() {
+    let config = crate::classical_worker::ClassicalWorkerConfig {
+        delay_ms: 100,
+        random_offset_ms: 20,
+        button: ClickButton::Left,
+        click_type: crate::input::ClickType::Single,
+        repeat_limit: 5,
+        target_pos: Some((150, 250)),
+    };
+    let state = crate::classical_worker::ClassicalWorkerState::new(config);
+    assert!(state.is_running());
+    assert_eq!(state.clicks(), 0);
+    assert_eq!(state.cps(), 0);
+}
+
+#[test]
+fn test_live_screen_capture() {
+    let mut cap = None;
+    let mut gray = Vec::new();
+    let res = crate::capture::capture_screen(&mut cap, &mut gray);
+    println!("capture_screen result: {:?}", res);
+    assert!(res.is_ok());
+}
+
+#[test]
+fn test_windows_ocr_engine_available() {
+    let engine = windows::Media::Ocr::OcrEngine::TryCreateFromUserProfileLanguages().unwrap();
+    let width = 200i32;
+    let height = 50i32;
+    // 200x50 BGRA image
+    let pixel_bytes = vec![255u8; (width * height * 4) as usize];
+    let writer = windows::Storage::Streams::DataWriter::new().unwrap();
+    writer.WriteBytes(&pixel_bytes).unwrap();
+    let buffer = writer.DetachBuffer().unwrap();
+    let bitmap = windows::Graphics::Imaging::SoftwareBitmap::CreateCopyFromBuffer(
+        &buffer,
+        windows::Graphics::Imaging::BitmapPixelFormat::Bgra8,
+        width,
+        height,
+    ).unwrap();
+    let op = engine.RecognizeAsync(&bitmap).unwrap();
+    while op.Status().unwrap().0 == 0 {
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let ocr_res = op.GetResults().unwrap();
+    let text = ocr_res.Text().unwrap().to_string();
+    println!("OCR Result on blank: '{}'", text);
+    assert_eq!(text, "");
 }
 
 #[test]

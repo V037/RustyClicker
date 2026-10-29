@@ -1,41 +1,51 @@
 use super::{
     ID_ALWAYS_ON_TOP, ID_BRAND_ICON, ID_CLASSICAL_ALWAYS_ON_TOP, ID_CLASSICAL_BUTTON_COMBO,
-    ID_CLASSICAL_BUTTON_LABEL, ID_CLASSICAL_CLOSE, ID_CLASSICAL_DELAY_INPUT,
-    ID_CLASSICAL_DELAY_LABEL, ID_CLASSICAL_NAV_BUTTON, ID_CLASSICAL_START, ID_CLASSICAL_STATS,
-    ID_CLASSICAL_STATUS_LABEL, ID_CLASSICAL_STOP, ID_CLASSICAL_TITLE, ID_CLEAR_IMAGE,
-    ID_CLICKER_BUTTON, ID_CLOSE, ID_CREDIT_LABEL, ID_DELAY_INPUT, ID_EMPTY_PREVIEW,
+    ID_CLASSICAL_BUTTON_LABEL, ID_CLASSICAL_CLICK_TYPE_COMBO, ID_CLASSICAL_CLOSE,
+    ID_CLASSICAL_DELAY_INPUT, ID_CLASSICAL_DELAY_LABEL, ID_CLASSICAL_HOURS_INPUT,
+    ID_CLASSICAL_LOCATION_CURRENT_RADIO, ID_CLASSICAL_LOCATION_PICK_RADIO, ID_CLASSICAL_MINS_INPUT,
+    ID_CLASSICAL_NAV_BUTTON, ID_CLASSICAL_PICK_BUTTON, ID_CLASSICAL_PICK_X_INPUT,
+    ID_CLASSICAL_PICK_Y_INPUT, ID_CLASSICAL_RANDOM_CHECK, ID_CLASSICAL_RANDOM_INPUT,
+    ID_CLASSICAL_REPEAT_COUNT_INPUT, ID_CLASSICAL_REPEAT_COUNT_RADIO,
+    ID_CLASSICAL_REPEAT_STOP_RADIO, ID_CLASSICAL_SECS_INPUT, ID_CLASSICAL_START,
+    ID_CLASSICAL_STATS, ID_CLASSICAL_STATUS_LABEL, ID_CLASSICAL_STOP, ID_CLASSICAL_TITLE,
+    ID_CLEAR_IMAGE, ID_CLICKER_BUTTON, ID_CLOSE, ID_CREDIT_LABEL, ID_DELAY_INPUT, ID_EMPTY_PREVIEW,
     ID_HIDE_WHEN_ACTIVE, ID_HOTKEY_CLOSE_LABEL, ID_HOTKEY_INSTRUCTION, ID_HOTKEY_START_LABEL,
     ID_HOTKEY_STOP_LABEL, ID_IMAGES_NAV_BUTTON, ID_MENU_HOTKEY_LABEL, ID_MENU_STATUS_TITLE,
     ID_MENU_TIPS_LABEL, ID_PREVIEW_LABEL, ID_SELECT_IMAGE, ID_SETTINGS, ID_SETTINGS_HEADING,
     ID_SLOT_COMBO, ID_SLOT_COUNT_INPUT, ID_SLOT_LABEL, ID_START, ID_STATUS_LABEL, ID_STOP,
-    ID_THEME_COMBO, ID_THREAD_COUNT_COMBO, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, TIMER_ID,
+    ID_THEME_COMBO, ID_THREAD_COUNT_COMBO, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH,
+    PICK_LOCATION_TIMER_ID, TIMER_ID,
     controls::create_controls,
     drawing::{draw_button, draw_cursor_icon, draw_empty_preview},
     layout::{layout_controls, scale, update_ui_font},
-    preferences::{rgb, vk_to_string},
+    preferences::{ClassicalLocationMode, ClassicalRepeatMode, rgb, vk_to_string},
     settings::{
         ID_SETTINGS_DELAY_LABEL, ID_SETTINGS_SLOT_COUNT_LABEL, ID_SETTINGS_THEME_LABEL,
         ID_SETTINGS_THREADS_LABEL,
     },
     state::{ActivePanel, AppState, set_text},
 };
-use crate::input::ClickButton;
+use crate::input::{ClickButton, ClickType};
 use std::sync::atomic::Ordering;
 use windows::Win32::{
     Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     Graphics::Gdi::{FillRect, HDC, ScreenToClient, SetBkColor, SetTextColor},
     UI::{
         Controls::{BST_CHECKED, DRAWITEMSTRUCT, NMHDR, NMTREEVIEWW, TVN_SELCHANGEDW},
-        Input::KeyboardAndMouse::{MOD_NOREPEAT, RegisterHotKey, ReleaseCapture, UnregisterHotKey},
+        Input::KeyboardAndMouse::{
+            GetAsyncKeyState, MOD_NOREPEAT, RegisterHotKey, ReleaseCapture, UnregisterHotKey,
+            VK_ESCAPE, VK_LBUTTON,
+        },
         WindowsAndMessaging::{
             BM_GETCHECK, BM_SETCHECK, CB_GETCURSEL, CBN_SELCHANGE, CallWindowProcW, DefWindowProcW,
-            DestroyWindow, EN_KILLFOCUS, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect, GetDlgCtrlID,
-            GetParent, GetWindowLongPtrW, GetWindowTextW, HTCAPTION, MB_ICONERROR, MB_ICONWARNING,
-            MINMAXINFO, PostMessageW, PostQuitMessage, SWP_NOACTIVATE, SWP_NOZORDER, SendMessageW,
-            SetTimer, SetWindowLongPtrW, SetWindowPos, WM_CLOSE, WM_COMMAND, WM_CREATE,
-            WM_CTLCOLORBTN, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY,
-            WM_DPICHANGED, WM_DRAWITEM, WM_ERASEBKGND, WM_GETMINMAXINFO, WM_HOTKEY, WM_KEYDOWN,
-            WM_LBUTTONDOWN, WM_NCCREATE, WM_NCHITTEST, WM_NOTIFY, WM_SIZE, WM_TIMER, WNDPROC,
+            DestroyWindow, EN_KILLFOCUS, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect, GetCursorPos,
+            GetDlgCtrlID, GetParent, GetWindowLongPtrW, GetWindowTextW, HTCAPTION, KillTimer,
+            MB_ICONERROR, MB_ICONWARNING, MINMAXINFO, PostMessageW, PostQuitMessage,
+            SWP_NOACTIVATE, SWP_NOZORDER, SendMessageW, SetTimer, SetWindowLongPtrW, SetWindowPos,
+            WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX,
+            WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_DRAWITEM, WM_ERASEBKGND,
+            WM_GETMINMAXINFO, WM_HOTKEY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_NCCREATE, WM_NCHITTEST,
+            WM_NOTIFY, WM_SIZE, WM_TIMER, WNDPROC,
         },
     },
 };
@@ -357,15 +367,46 @@ pub(crate) unsafe extern "system" fn window_proc(
                     )
                     .0 == BST_CHECKED.0 as isize;
                     state.set_hide_when_active(checked);
+                } else if id == ID_CLASSICAL_HOURS_INPUT && notification == EN_KILLFOCUS as usize {
+                    state.classical_hours =
+                        read_edit_u32(state.classical_hours_input, state.classical_hours);
+                    state.sync_classical_interval();
+                    state.update_menu_summary();
+                    state.save_preferences();
+                } else if id == ID_CLASSICAL_MINS_INPUT && notification == EN_KILLFOCUS as usize {
+                    state.classical_mins =
+                        read_edit_u32(state.classical_mins_input, state.classical_mins);
+                    state.sync_classical_interval();
+                    state.update_menu_summary();
+                    state.save_preferences();
+                } else if id == ID_CLASSICAL_SECS_INPUT && notification == EN_KILLFOCUS as usize {
+                    state.classical_secs =
+                        read_edit_u32(state.classical_secs_input, state.classical_secs);
+                    state.sync_classical_interval();
+                    state.update_menu_summary();
+                    state.save_preferences();
                 } else if id == ID_CLASSICAL_DELAY_INPUT && notification == EN_KILLFOCUS as usize {
-                    let mut value = [0u16; 32];
-                    let length = GetWindowTextW(state.classical_delay_input, &mut value);
-                    let delay = usize::try_from(length)
-                        .ok()
-                        .and_then(|length| String::from_utf16(&value[..length]).ok())
-                        .and_then(|value| value.parse::<u64>().ok())
-                        .unwrap_or(50);
-                    state.set_classical_delay(delay);
+                    state.classical_millis =
+                        read_edit_u32(state.classical_millis_input, state.classical_millis);
+                    state.sync_classical_interval();
+                    state.update_menu_summary();
+                    state.save_preferences();
+                } else if id == ID_CLASSICAL_RANDOM_CHECK {
+                    let checked = SendMessageW(
+                        state.classical_random_checkbox,
+                        BM_GETCHECK,
+                        Some(WPARAM(0)),
+                        Some(LPARAM(0)),
+                    )
+                    .0 == BST_CHECKED.0 as isize;
+                    state.classical_random_offset_enabled = checked;
+                    state.save_preferences();
+                } else if id == ID_CLASSICAL_RANDOM_INPUT && notification == EN_KILLFOCUS as usize {
+                    state.classical_random_offset_ms = read_edit_u32(
+                        state.classical_random_input,
+                        state.classical_random_offset_ms,
+                    );
+                    state.save_preferences();
                 } else if id == ID_CLASSICAL_BUTTON_COMBO && notification == CBN_SELCHANGE as usize
                 {
                     let selection = SendMessageW(
@@ -381,6 +422,107 @@ pub(crate) unsafe extern "system" fn window_proc(
                         _ => ClickButton::Left,
                     };
                     state.set_classical_button(btn);
+                } else if id == ID_CLASSICAL_CLICK_TYPE_COMBO
+                    && notification == CBN_SELCHANGE as usize
+                {
+                    let selection = SendMessageW(
+                        state.classical_click_type_combo,
+                        CB_GETCURSEL,
+                        Some(WPARAM(0)),
+                        Some(LPARAM(0)),
+                    )
+                    .0;
+                    let click_type = match selection {
+                        1 => ClickType::Double,
+                        _ => ClickType::Single,
+                    };
+                    state.classical_click_type = click_type;
+                    state.save_preferences();
+                } else if id == ID_CLASSICAL_REPEAT_STOP_RADIO {
+                    state.classical_repeat_mode = ClassicalRepeatMode::UntilStopped;
+                    let _ = SendMessageW(
+                        state.classical_repeat_stopped_radio,
+                        BM_SETCHECK,
+                        Some(WPARAM(BST_CHECKED.0 as usize)),
+                        Some(LPARAM(0)),
+                    );
+                    let _ = SendMessageW(
+                        state.classical_repeat_count_radio,
+                        BM_SETCHECK,
+                        Some(WPARAM(0)),
+                        Some(LPARAM(0)),
+                    );
+                    state.save_preferences();
+                } else if id == ID_CLASSICAL_REPEAT_COUNT_RADIO {
+                    state.classical_repeat_mode = ClassicalRepeatMode::Count;
+                    let _ = SendMessageW(
+                        state.classical_repeat_stopped_radio,
+                        BM_SETCHECK,
+                        Some(WPARAM(0)),
+                        Some(LPARAM(0)),
+                    );
+                    let _ = SendMessageW(
+                        state.classical_repeat_count_radio,
+                        BM_SETCHECK,
+                        Some(WPARAM(BST_CHECKED.0 as usize)),
+                        Some(LPARAM(0)),
+                    );
+                    state.save_preferences();
+                } else if id == ID_CLASSICAL_REPEAT_COUNT_INPUT
+                    && notification == EN_KILLFOCUS as usize
+                {
+                    let count = read_edit_u32(
+                        state.classical_repeat_count_input,
+                        state.classical_repeat_count as u32,
+                    );
+                    state.classical_repeat_count = (count as u64).max(1);
+                    state.save_preferences();
+                } else if id == ID_CLASSICAL_LOCATION_CURRENT_RADIO {
+                    state.classical_location_mode = ClassicalLocationMode::Current;
+                    let _ = SendMessageW(
+                        state.classical_location_current_radio,
+                        BM_SETCHECK,
+                        Some(WPARAM(BST_CHECKED.0 as usize)),
+                        Some(LPARAM(0)),
+                    );
+                    let _ = SendMessageW(
+                        state.classical_location_pick_radio,
+                        BM_SETCHECK,
+                        Some(WPARAM(0)),
+                        Some(LPARAM(0)),
+                    );
+                    state.save_preferences();
+                } else if id == ID_CLASSICAL_LOCATION_PICK_RADIO {
+                    state.classical_location_mode = ClassicalLocationMode::Pick;
+                    let _ = SendMessageW(
+                        state.classical_location_current_radio,
+                        BM_SETCHECK,
+                        Some(WPARAM(0)),
+                        Some(LPARAM(0)),
+                    );
+                    let _ = SendMessageW(
+                        state.classical_location_pick_radio,
+                        BM_SETCHECK,
+                        Some(WPARAM(BST_CHECKED.0 as usize)),
+                        Some(LPARAM(0)),
+                    );
+                    state.save_preferences();
+                } else if id == ID_CLASSICAL_PICK_X_INPUT && notification == EN_KILLFOCUS as usize {
+                    state.classical_pick_x =
+                        read_edit_i32(state.classical_pick_x_input, state.classical_pick_x);
+                    state.save_preferences();
+                } else if id == ID_CLASSICAL_PICK_Y_INPUT && notification == EN_KILLFOCUS as usize {
+                    state.classical_pick_y =
+                        read_edit_i32(state.classical_pick_y_input, state.classical_pick_y);
+                    state.save_preferences();
+                } else if id == ID_CLASSICAL_PICK_BUTTON {
+                    state.is_picking_location = true;
+                    state.pick_released = false;
+                    set_text(
+                        state.classical_status_label,
+                        "Click anywhere to pick coordinate (or Esc to cancel)...",
+                    );
+                    let _ = SetTimer(Some(window), PICK_LOCATION_TIMER_ID, 30, None);
                 } else if id == ID_DELAY_INPUT && notification == EN_KILLFOCUS as usize {
                     let mut value = [0u16; 32];
                     let length = GetWindowTextW(state.click_delay_input, &mut value);
@@ -530,7 +672,57 @@ pub(crate) unsafe extern "system" fn window_proc(
                 }
                 LRESULT(0)
             }
+            WM_TIMER if wparam.0 == PICK_LOCATION_TIMER_ID => {
+                if state.is_picking_location {
+                    if (GetAsyncKeyState(VK_ESCAPE.0 as i32) as u16 & 0x8000) != 0 {
+                        state.is_picking_location = false;
+                        let _ = KillTimer(Some(window), PICK_LOCATION_TIMER_ID);
+                        let start_str = vk_to_string(state.start_hotkey);
+                        set_text(
+                            state.classical_status_label,
+                            &format!("Cancelled. Press {start_str} to start."),
+                        );
+                    } else if !state.pick_released {
+                        if (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8000) == 0 {
+                            state.pick_released = true;
+                        }
+                    } else if (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8000) != 0 {
+                        let mut pt = POINT::default();
+                        let _ = GetCursorPos(&mut pt);
+                        state.classical_pick_x = pt.x;
+                        state.classical_pick_y = pt.y;
+                        state.classical_location_mode = ClassicalLocationMode::Pick;
+                        set_text(state.classical_pick_x_input, &pt.x.to_string());
+                        set_text(state.classical_pick_y_input, &pt.y.to_string());
+                        let _ = SendMessageW(
+                            state.classical_location_current_radio,
+                            BM_SETCHECK,
+                            Some(WPARAM(0)),
+                            Some(LPARAM(0)),
+                        );
+                        let _ = SendMessageW(
+                            state.classical_location_pick_radio,
+                            BM_SETCHECK,
+                            Some(WPARAM(BST_CHECKED.0 as usize)),
+                            Some(LPARAM(0)),
+                        );
+                        state.is_picking_location = false;
+                        let _ = KillTimer(Some(window), PICK_LOCATION_TIMER_ID);
+                        let start_str = vk_to_string(state.start_hotkey);
+                        set_text(
+                            state.classical_status_label,
+                            &format!("Picked ({}, {}). Press {start_str} to start.", pt.x, pt.y),
+                        );
+                        state.save_preferences();
+                    }
+                } else {
+                    let _ = KillTimer(Some(window), PICK_LOCATION_TIMER_ID);
+                }
+                LRESULT(0)
+            }
             WM_CLOSE => {
+                let _ = KillTimer(Some(window), PICK_LOCATION_TIMER_ID);
+                state.is_picking_location = false;
                 state.restore_window(window);
                 state.save_preferences();
                 state.stop_classical(window);
@@ -545,6 +737,10 @@ pub(crate) unsafe extern "system" fn window_proc(
             }
             WM_DESTROY => {
                 let _ = windows::Win32::UI::WindowsAndMessaging::KillTimer(Some(window), TIMER_ID);
+                let _ = windows::Win32::UI::WindowsAndMessaging::KillTimer(
+                    Some(window),
+                    PICK_LOCATION_TIMER_ID,
+                );
                 for id in 1..=3 {
                     let _ = UnregisterHotKey(Some(window), id);
                 }
@@ -554,4 +750,24 @@ pub(crate) unsafe extern "system" fn window_proc(
             _ => DefWindowProcW(window, message, wparam, lparam),
         }
     }
+}
+
+unsafe fn read_edit_u32(hwnd: HWND, default: u32) -> u32 {
+    let mut value = [0u16; 32];
+    let length = unsafe { GetWindowTextW(hwnd, &mut value) };
+    usize::try_from(length)
+        .ok()
+        .and_then(|length| String::from_utf16(&value[..length]).ok())
+        .and_then(|text| text.trim().parse::<u32>().ok())
+        .unwrap_or(default)
+}
+
+unsafe fn read_edit_i32(hwnd: HWND, default: i32) -> i32 {
+    let mut value = [0u16; 32];
+    let length = unsafe { GetWindowTextW(hwnd, &mut value) };
+    usize::try_from(length)
+        .ok()
+        .and_then(|length| String::from_utf16(&value[..length]).ok())
+        .and_then(|text| text.trim().parse::<i32>().ok())
+        .unwrap_or(default)
 }

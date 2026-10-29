@@ -1,0 +1,13 @@
+[package]
+name = "rusty-clicker-py"
+version = "1.3.2"
+edition = "2024"
+
+[lib]
+name = "rusty_clicker"
+crate-type = ["cdylib"]
+
+[dependencies]
+rusty_clicker_core = { package = "rusty-clicker", path = ".." }
+pyo3 = { version = "0.30.1", features = ["extension-module", "abi3-py310"] }
+image = { version = "0.25.10", default-features = false, features = ["bmp", "jpeg", "png"] }

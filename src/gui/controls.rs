@@ -1,7 +1,12 @@
 use super::{
     BUTTON_STYLE, ID_ALWAYS_ON_TOP, ID_BRAND_ICON, ID_CLASSICAL_ALWAYS_ON_TOP,
-    ID_CLASSICAL_BUTTON_COMBO, ID_CLASSICAL_BUTTON_LABEL, ID_CLASSICAL_CLOSE,
-    ID_CLASSICAL_DELAY_INPUT, ID_CLASSICAL_DELAY_LABEL, ID_CLASSICAL_NAV_BUTTON,
+    ID_CLASSICAL_BUTTON_COMBO, ID_CLASSICAL_BUTTON_LABEL, ID_CLASSICAL_CLICK_TYPE_COMBO,
+    ID_CLASSICAL_CLOSE, ID_CLASSICAL_DELAY_INPUT, ID_CLASSICAL_DELAY_LABEL,
+    ID_CLASSICAL_HOURS_INPUT, ID_CLASSICAL_LOCATION_CURRENT_RADIO,
+    ID_CLASSICAL_LOCATION_PICK_RADIO, ID_CLASSICAL_MINS_INPUT, ID_CLASSICAL_NAV_BUTTON,
+    ID_CLASSICAL_PICK_BUTTON, ID_CLASSICAL_PICK_X_INPUT, ID_CLASSICAL_PICK_Y_INPUT,
+    ID_CLASSICAL_RANDOM_CHECK, ID_CLASSICAL_RANDOM_INPUT, ID_CLASSICAL_REPEAT_COUNT_INPUT,
+    ID_CLASSICAL_REPEAT_COUNT_RADIO, ID_CLASSICAL_REPEAT_STOP_RADIO, ID_CLASSICAL_SECS_INPUT,
     ID_CLASSICAL_START, ID_CLASSICAL_STATS, ID_CLASSICAL_STATUS_LABEL, ID_CLASSICAL_STOP,
     ID_CLASSICAL_TITLE, ID_CLEAR_IMAGE, ID_CLOSE, ID_CREDIT_LABEL, ID_DELAY_INPUT,
     ID_EMPTY_PREVIEW, ID_HIDE_WHEN_ACTIVE, ID_HOTKEY_CLOSE_INPUT, ID_HOTKEY_CLOSE_LABEL,
@@ -12,7 +17,7 @@ use super::{
     ID_STATUS_LABEL, ID_STOP, ID_THEME_COMBO, ID_THREAD_COUNT_COMBO, ID_VERSION_LABEL,
     layout::{layout_controls, update_ui_font},
     logic_gui::{ID_LOGIC_BUTTON, create_logic_controls},
-    preferences::{Theme, vk_to_string},
+    preferences::{ClassicalLocationMode, ClassicalRepeatMode, Theme, vk_to_string},
     settings::{
         ID_SETTINGS_DELAY_LABEL, ID_SETTINGS_SLOT_COUNT_LABEL, ID_SETTINGS_THEME_LABEL,
         ID_SETTINGS_THREADS_LABEL, THEMES,
@@ -20,7 +25,7 @@ use super::{
     state::{AppState, set_text},
     wndproc::make_static_draggable,
 };
-use crate::input::ClickButton;
+use crate::input::{ClickButton, ClickType};
 use crate::matching::MATCH_THREAD_OPTIONS;
 use windows::{
     Win32::{
@@ -30,14 +35,14 @@ use windows::{
             Controls::BST_CHECKED,
             HiDpi::GetDpiForWindow,
             WindowsAndMessaging::{
-                BM_SETCHECK, BS_AUTOCHECKBOX, CB_ADDSTRING, CB_SETCURSEL, CBS_DROPDOWNLIST,
-                CallWindowProcW, CreateWindowExW, DefWindowProcW, ES_AUTOHSCROLL, ES_NUMBER,
-                GWLP_USERDATA, GWLP_WNDPROC, GetDlgCtrlID, GetParent, GetPropW, GetWindowLongPtrW,
-                HMENU, HWND_TOPMOST, MB_ICONERROR, MB_ICONWARNING, SW_HIDE, SW_SHOW,
-                SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SendMessageW, SetPropW, SetWindowLongPtrW,
-                SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CHAR, WM_KEYDOWN,
-                WM_LBUTTONDOWN, WM_SETFOCUS, WM_SYSKEYDOWN, WNDPROC, WS_BORDER, WS_CHILD,
-                WS_VISIBLE,
+                BM_SETCHECK, BS_AUTOCHECKBOX, BS_AUTORADIOBUTTON, CB_ADDSTRING, CB_SETCURSEL,
+                CBS_DROPDOWNLIST, CallWindowProcW, CreateWindowExW, DefWindowProcW, ES_AUTOHSCROLL,
+                ES_NUMBER, GWLP_USERDATA, GWLP_WNDPROC, GetDlgCtrlID, GetParent, GetPropW,
+                GetWindowLongPtrW, HMENU, HWND_TOPMOST, MB_ICONERROR, MB_ICONWARNING, SW_HIDE,
+                SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SendMessageW, SetPropW,
+                SetWindowLongPtrW, SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WINDOW_STYLE,
+                WM_CHAR, WM_KEYDOWN, WM_LBUTTONDOWN, WM_SETFOCUS, WM_SYSKEYDOWN, WNDPROC,
+                WS_BORDER, WS_CHILD, WS_VISIBLE,
             },
         },
     },
@@ -541,34 +546,159 @@ pub(crate) unsafe fn create_controls(window: HWND, state: &mut AppState) {
         state.classical_delay_label = create_control(
             window,
             w!("STATIC"),
-            "Click interval (ms) [0 = uncapped]",
+            "Click interval",
             WINDOW_STYLE(0),
             18,
-            106,
+            60,
             260,
-            20,
+            18,
             ID_CLASSICAL_DELAY_LABEL,
         );
-        state.classical_delay_input = create_control(
+        state.classical_hours_input = create_control(
             window,
             w!("EDIT"),
-            &state.classical_delay_ms.to_string(),
+            &state.classical_hours.to_string(),
             WINDOW_STYLE(ES_NUMBER as u32 | ES_AUTOHSCROLL as u32 | WS_BORDER.0),
             18,
-            128,
-            200,
-            26,
+            80,
+            40,
+            22,
+            ID_CLASSICAL_HOURS_INPUT,
+        );
+        state.classical_hours_label = create_control(
+            window,
+            w!("STATIC"),
+            "hours",
+            WINDOW_STYLE(0),
+            60,
+            80,
+            38,
+            18,
+            0,
+        );
+        state.classical_mins_input = create_control(
+            window,
+            w!("EDIT"),
+            &state.classical_mins.to_string(),
+            WINDOW_STYLE(ES_NUMBER as u32 | ES_AUTOHSCROLL as u32 | WS_BORDER.0),
+            100,
+            80,
+            40,
+            22,
+            ID_CLASSICAL_MINS_INPUT,
+        );
+        state.classical_mins_label = create_control(
+            window,
+            w!("STATIC"),
+            "mins",
+            WINDOW_STYLE(0),
+            142,
+            80,
+            32,
+            18,
+            0,
+        );
+        state.classical_secs_input = create_control(
+            window,
+            w!("EDIT"),
+            &state.classical_secs.to_string(),
+            WINDOW_STYLE(ES_NUMBER as u32 | ES_AUTOHSCROLL as u32 | WS_BORDER.0),
+            176,
+            80,
+            40,
+            22,
+            ID_CLASSICAL_SECS_INPUT,
+        );
+        state.classical_secs_label = create_control(
+            window,
+            w!("STATIC"),
+            "secs",
+            WINDOW_STYLE(0),
+            218,
+            80,
+            32,
+            18,
+            0,
+        );
+        state.classical_millis_input = create_control(
+            window,
+            w!("EDIT"),
+            &state.classical_millis.to_string(),
+            WINDOW_STYLE(ES_NUMBER as u32 | ES_AUTOHSCROLL as u32 | WS_BORDER.0),
+            252,
+            80,
+            45,
+            22,
             ID_CLASSICAL_DELAY_INPUT,
+        );
+        state.classical_delay_input = state.classical_millis_input;
+        state.classical_millis_label = create_control(
+            window,
+            w!("STATIC"),
+            "milliseconds",
+            WINDOW_STYLE(0),
+            300,
+            80,
+            75,
+            18,
+            0,
+        );
+
+        state.classical_random_checkbox = create_control(
+            window,
+            w!("BUTTON"),
+            "Random offset ±",
+            WINDOW_STYLE(BS_AUTOCHECKBOX as u32),
+            18,
+            106,
+            114,
+            20,
+            ID_CLASSICAL_RANDOM_CHECK,
+        );
+        state.classical_random_input = create_control(
+            window,
+            w!("EDIT"),
+            &state.classical_random_offset_ms.to_string(),
+            WINDOW_STYLE(ES_NUMBER as u32 | ES_AUTOHSCROLL as u32 | WS_BORDER.0),
+            134,
+            106,
+            40,
+            22,
+            ID_CLASSICAL_RANDOM_INPUT,
+        );
+        state.classical_random_label = create_control(
+            window,
+            w!("STATIC"),
+            "milliseconds",
+            WINDOW_STYLE(0),
+            178,
+            106,
+            75,
+            18,
+            0,
+        );
+
+        // Click options (Left column)
+        state.classical_options_title = create_control(
+            window,
+            w!("STATIC"),
+            "Click options",
+            WINDOW_STYLE(0),
+            18,
+            132,
+            150,
+            18,
+            0,
         );
         state.classical_button_label = create_control(
             window,
             w!("STATIC"),
-            "Click button",
+            "Mouse button:",
             WINDOW_STYLE(0),
             18,
-            162,
-            260,
-            20,
+            152,
+            80,
+            18,
             ID_CLASSICAL_BUTTON_LABEL,
         );
         state.classical_button_combo = create_control(
@@ -576,19 +706,189 @@ pub(crate) unsafe fn create_controls(window: HWND, state: &mut AppState) {
             w!("COMBOBOX"),
             "",
             WINDOW_STYLE(CBS_DROPDOWNLIST as u32),
-            18,
-            184,
-            200,
+            100,
+            150,
+            68,
             100,
             ID_CLASSICAL_BUTTON_COMBO,
         );
+        state.classical_click_type_label = create_control(
+            window,
+            w!("STATIC"),
+            "Click type:",
+            WINDOW_STYLE(0),
+            18,
+            176,
+            80,
+            18,
+            0,
+        );
+        state.classical_click_type_combo = create_control(
+            window,
+            w!("COMBOBOX"),
+            "",
+            WINDOW_STYLE(CBS_DROPDOWNLIST as u32),
+            100,
+            174,
+            68,
+            100,
+            ID_CLASSICAL_CLICK_TYPE_COMBO,
+        );
+
+        // Click repeat (Right column)
+        state.classical_repeat_title = create_control(
+            window,
+            w!("STATIC"),
+            "Click repeat",
+            WINDOW_STYLE(0),
+            180,
+            132,
+            150,
+            18,
+            0,
+        );
+        state.classical_repeat_count_radio = create_control(
+            window,
+            w!("BUTTON"),
+            "Repeat",
+            WINDOW_STYLE(BS_AUTORADIOBUTTON as u32),
+            180,
+            152,
+            58,
+            18,
+            ID_CLASSICAL_REPEAT_COUNT_RADIO,
+        );
+        state.classical_repeat_count_input = create_control(
+            window,
+            w!("EDIT"),
+            &state.classical_repeat_count.to_string(),
+            WINDOW_STYLE(ES_NUMBER as u32 | ES_AUTOHSCROLL as u32 | WS_BORDER.0),
+            240,
+            150,
+            38,
+            22,
+            ID_CLASSICAL_REPEAT_COUNT_INPUT,
+        );
+        state.classical_repeat_count_label = create_control(
+            window,
+            w!("STATIC"),
+            "times",
+            WINDOW_STYLE(0),
+            282,
+            152,
+            36,
+            18,
+            0,
+        );
+        state.classical_repeat_stopped_radio = create_control(
+            window,
+            w!("BUTTON"),
+            "Repeat until stopped",
+            WINDOW_STYLE(BS_AUTORADIOBUTTON as u32),
+            180,
+            176,
+            140,
+            18,
+            ID_CLASSICAL_REPEAT_STOP_RADIO,
+        );
+
+        // Cursor position (Bottom row)
+        state.classical_location_title = create_control(
+            window,
+            w!("STATIC"),
+            "Cursor position",
+            WINDOW_STYLE(0),
+            18,
+            202,
+            200,
+            18,
+            0,
+        );
+        state.classical_location_current_radio = create_control(
+            window,
+            w!("BUTTON"),
+            "Current location",
+            WINDOW_STYLE(BS_AUTORADIOBUTTON as u32),
+            18,
+            222,
+            110,
+            18,
+            ID_CLASSICAL_LOCATION_CURRENT_RADIO,
+        );
+        state.classical_location_pick_radio = create_control(
+            window,
+            w!("BUTTON"),
+            "",
+            WINDOW_STYLE(BS_AUTORADIOBUTTON as u32),
+            130,
+            222,
+            18,
+            18,
+            ID_CLASSICAL_LOCATION_PICK_RADIO,
+        );
+        state.classical_pick_button = create_control(
+            window,
+            w!("BUTTON"),
+            "Pick location",
+            WINDOW_STYLE(BUTTON_STYLE),
+            150,
+            220,
+            84,
+            22,
+            ID_CLASSICAL_PICK_BUTTON,
+        );
+        state.classical_pick_x_label = create_control(
+            window,
+            w!("STATIC"),
+            "X",
+            WINDOW_STYLE(0),
+            238,
+            222,
+            14,
+            18,
+            0,
+        );
+        state.classical_pick_x_input = create_control(
+            window,
+            w!("EDIT"),
+            &state.classical_pick_x.to_string(),
+            WINDOW_STYLE(ES_AUTOHSCROLL as u32 | WS_BORDER.0),
+            254,
+            220,
+            34,
+            22,
+            ID_CLASSICAL_PICK_X_INPUT,
+        );
+        state.classical_pick_y_label = create_control(
+            window,
+            w!("STATIC"),
+            "Y",
+            WINDOW_STYLE(0),
+            292,
+            222,
+            14,
+            18,
+            0,
+        );
+        state.classical_pick_y_input = create_control(
+            window,
+            w!("EDIT"),
+            &state.classical_pick_y.to_string(),
+            WINDOW_STYLE(ES_AUTOHSCROLL as u32 | WS_BORDER.0),
+            308,
+            220,
+            34,
+            22,
+            ID_CLASSICAL_PICK_Y_INPUT,
+        );
+
         state.classical_stats_label = create_control(
             window,
             w!("STATIC"),
             "Clicks: 0  |  Speed: 0 CPS",
             WINDOW_STYLE(0),
             18,
-            222,
+            250,
             300,
             22,
             ID_CLASSICAL_STATS,
@@ -652,9 +952,35 @@ pub(crate) unsafe fn create_controls(window: HWND, state: &mut AppState) {
             state.classical_title,
             state.classical_subtitle,
             state.classical_delay_label,
-            state.classical_delay_input,
+            state.classical_hours_input,
+            state.classical_hours_label,
+            state.classical_mins_input,
+            state.classical_mins_label,
+            state.classical_secs_input,
+            state.classical_secs_label,
+            state.classical_millis_input,
+            state.classical_millis_label,
+            state.classical_random_checkbox,
+            state.classical_random_input,
+            state.classical_random_label,
+            state.classical_options_title,
             state.classical_button_label,
             state.classical_button_combo,
+            state.classical_click_type_label,
+            state.classical_click_type_combo,
+            state.classical_repeat_title,
+            state.classical_repeat_count_radio,
+            state.classical_repeat_count_input,
+            state.classical_repeat_count_label,
+            state.classical_repeat_stopped_radio,
+            state.classical_location_title,
+            state.classical_location_current_radio,
+            state.classical_location_pick_radio,
+            state.classical_pick_button,
+            state.classical_pick_x_label,
+            state.classical_pick_x_input,
+            state.classical_pick_y_label,
+            state.classical_pick_y_input,
             state.classical_stats_label,
             state.classical_status_label,
             state.classical_start_button,
@@ -958,6 +1284,86 @@ pub(crate) unsafe fn create_controls(window: HWND, state: &mut AppState) {
             state.classical_button_combo,
             CB_SETCURSEL,
             Some(WPARAM(cur_sel)),
+            Some(LPARAM(0)),
+        );
+
+        for click_type in [ClickType::Single, ClickType::Double] {
+            let label = click_type.name();
+            let wide: Vec<u16> = label.encode_utf16().chain(Some(0)).collect();
+            SendMessageW(
+                state.classical_click_type_combo,
+                CB_ADDSTRING,
+                Some(WPARAM(0)),
+                Some(LPARAM(wide.as_ptr() as isize)),
+            );
+        }
+        let type_sel = match state.classical_click_type {
+            ClickType::Single => 0,
+            ClickType::Double => 1,
+        };
+        SendMessageW(
+            state.classical_click_type_combo,
+            CB_SETCURSEL,
+            Some(WPARAM(type_sel)),
+            Some(LPARAM(0)),
+        );
+
+        SendMessageW(
+            state.classical_random_checkbox,
+            BM_SETCHECK,
+            Some(WPARAM(if state.classical_random_offset_enabled {
+                BST_CHECKED.0 as usize
+            } else {
+                0
+            })),
+            Some(LPARAM(0)),
+        );
+        SendMessageW(
+            state.classical_repeat_stopped_radio,
+            BM_SETCHECK,
+            Some(WPARAM(
+                if state.classical_repeat_mode == ClassicalRepeatMode::UntilStopped {
+                    BST_CHECKED.0 as usize
+                } else {
+                    0
+                },
+            )),
+            Some(LPARAM(0)),
+        );
+        SendMessageW(
+            state.classical_repeat_count_radio,
+            BM_SETCHECK,
+            Some(WPARAM(
+                if state.classical_repeat_mode == ClassicalRepeatMode::Count {
+                    BST_CHECKED.0 as usize
+                } else {
+                    0
+                },
+            )),
+            Some(LPARAM(0)),
+        );
+        SendMessageW(
+            state.classical_location_current_radio,
+            BM_SETCHECK,
+            Some(WPARAM(
+                if state.classical_location_mode == ClassicalLocationMode::Current {
+                    BST_CHECKED.0 as usize
+                } else {
+                    0
+                },
+            )),
+            Some(LPARAM(0)),
+        );
+        SendMessageW(
+            state.classical_location_pick_radio,
+            BM_SETCHECK,
+            Some(WPARAM(
+                if state.classical_location_mode == ClassicalLocationMode::Pick {
+                    BST_CHECKED.0 as usize
+                } else {
+                    0
+                },
+            )),
             Some(LPARAM(0)),
         );
 

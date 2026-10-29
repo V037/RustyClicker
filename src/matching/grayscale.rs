@@ -1,7 +1,7 @@
 use crate::core::CoreError;
 
 /// Converts RGB bytes to grayscale using OpenCV-compatible fixed-point coefficients.
-pub(crate) fn rgb_to_gray(rgb: &[u8], width: u32, height: u32) -> Result<Vec<u8>, CoreError> {
+pub fn rgb_to_gray(rgb: &[u8], width: u32, height: u32) -> Result<Vec<u8>, CoreError> {
     let expected_bytes = usize::try_from(width)
         .ok()
         .and_then(|width| {
@@ -26,12 +26,12 @@ pub(crate) fn rgb_to_gray(rgb: &[u8], width: u32, height: u32) -> Result<Vec<u8>
 }
 
 #[inline]
-pub(crate) fn rgb_pixel_to_gray(red: u8, green: u8, blue: u8) -> u8 {
+pub fn rgb_pixel_to_gray(red: u8, green: u8, blue: u8) -> u8 {
     let gray = 4_899 * u32::from(red) + 9_617 * u32::from(green) + 1_868 * u32::from(blue) + 8_192;
     (gray >> 14) as u8
 }
 
-pub(crate) fn bgra_to_gray(
+pub fn bgra_to_gray(
     bgra: &[u8],
     width: u32,
     height: u32,

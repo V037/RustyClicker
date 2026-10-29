@@ -4,16 +4,35 @@ use crate::core::CoreError;
 use image::RgbaImage;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-pub(crate) struct PreparedTemplate {
-    pub(crate) width: u32,
-    pub(crate) height: u32,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MatchResult {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+    pub score: f32,
+}
+
+impl MatchResult {
+    pub fn center_x(&self) -> u32 {
+        self.x + self.width / 2
+    }
+
+    pub fn center_y(&self) -> u32 {
+        self.y + self.height / 2
+    }
+}
+
+pub struct PreparedTemplate {
+    pub width: u32,
+    pub height: u32,
     gray_energy: f64,
     matcher: Option<corrmatch::Matcher>,
 }
 
 impl PreparedTemplate {
     /// Prepares a grayscale, mean-centered template for normalized correlation.
-    pub(crate) fn new(source: RgbaImage) -> Result<Self, CoreError> {
+    pub fn new(source: RgbaImage) -> Result<Self, CoreError> {
         let (width, height) = source.dimensions();
         if width == 0 || height == 0 {
             return Err(CoreError::InvalidImageDimensions);
@@ -61,11 +80,11 @@ impl PreparedTemplate {
         })
     }
 
-    pub(crate) fn is_valid(&self) -> bool {
+    pub fn is_valid(&self) -> bool {
         self.width > 0 && self.height > 0 && self.gray_energy > 1e-12 && self.matcher.is_some()
     }
 
-    pub(crate) fn find_match(
+    pub fn find_match_detailed(
         &self,
         screen_gray: &[u8],
         screen_width: u32,
@@ -73,7 +92,7 @@ impl PreparedTemplate {
         confidence: f32,
         stop: Option<&AtomicBool>,
         thread_count: usize,
-    ) -> Result<Option<(u32, u32, u32, u32)>, CoreError> {
+    ) -> Result<Option<MatchResult>, CoreError> {
         if !self.is_valid()
             || self.width > screen_width
             || self.height > screen_height
@@ -109,6 +128,32 @@ impl PreparedTemplate {
         let max_y = screen_height - self.height;
         let x = (result.x.round() as u32).min(max_x);
         let y = (result.y.round() as u32).min(max_y);
-        Ok(Some((x, y, self.width, self.height)))
+        Ok(Some(MatchResult {
+            x,
+            y,
+            width: self.width,
+            height: self.height,
+            score: result.score,
+        }))
+    }
+
+    pub fn find_match(
+        &self,
+        screen_gray: &[u8],
+        screen_width: u32,
+        screen_height: u32,
+        confidence: f32,
+        stop: Option<&AtomicBool>,
+        thread_count: usize,
+    ) -> Result<Option<(u32, u32, u32, u32)>, CoreError> {
+        self.find_match_detailed(
+            screen_gray,
+            screen_width,
+            screen_height,
+            confidence,
+            stop,
+            thread_count,
+        )
+        .map(|opt| opt.map(|m| (m.x, m.y, m.width, m.height)))
     }
 }

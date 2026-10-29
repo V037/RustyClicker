@@ -37,9 +37,9 @@ use windows::{
 pub(crate) const WINDOW_CLASS: PCWSTR = w!("RustImageClickerWindow");
 pub(crate) const WINDOW_TITLE: PCWSTR = w!("RustyClicker");
 pub(crate) const DEFAULT_WINDOW_WIDTH: i32 = 360;
-pub(crate) const DEFAULT_WINDOW_HEIGHT: i32 = 330;
-pub(crate) const MIN_WINDOW_WIDTH: i32 = 320;
-pub(crate) const MIN_WINDOW_HEIGHT: i32 = 330;
+pub(crate) const DEFAULT_WINDOW_HEIGHT: i32 = 440;
+pub(crate) const MIN_WINDOW_WIDTH: i32 = 330;
+pub(crate) const MIN_WINDOW_HEIGHT: i32 = 380;
 pub(crate) const MAX_IMAGE_COUNT: usize = 99;
 pub(crate) const TIMER_ID: usize = 1;
 pub(crate) const ID_START: usize = 10;
@@ -88,11 +88,26 @@ pub(crate) const ID_HOTKEY_CLOSE_LABEL: usize = 321;
 pub(crate) const ID_HOTKEY_INSTRUCTION: usize = 322;
 pub(crate) const ID_SETTINGS_HEADING: usize = 323;
 pub(crate) const ID_CLASSICAL_STATUS_LABEL: usize = 324;
+pub(crate) const ID_CLASSICAL_HOURS_INPUT: usize = 325;
+pub(crate) const ID_CLASSICAL_MINS_INPUT: usize = 326;
+pub(crate) const ID_CLASSICAL_SECS_INPUT: usize = 327;
+pub(crate) const ID_CLASSICAL_RANDOM_CHECK: usize = 328;
+pub(crate) const ID_CLASSICAL_RANDOM_INPUT: usize = 329;
+pub(crate) const ID_CLASSICAL_CLICK_TYPE_COMBO: usize = 330;
+pub(crate) const ID_CLASSICAL_REPEAT_STOP_RADIO: usize = 331;
+pub(crate) const ID_CLASSICAL_REPEAT_COUNT_RADIO: usize = 332;
+pub(crate) const ID_CLASSICAL_REPEAT_COUNT_INPUT: usize = 333;
+pub(crate) const ID_CLASSICAL_LOCATION_CURRENT_RADIO: usize = 334;
+pub(crate) const ID_CLASSICAL_LOCATION_PICK_RADIO: usize = 335;
+pub(crate) const ID_CLASSICAL_PICK_BUTTON: usize = 336;
+pub(crate) const ID_CLASSICAL_PICK_X_INPUT: usize = 337;
+pub(crate) const ID_CLASSICAL_PICK_Y_INPUT: usize = 338;
+pub(crate) const PICK_LOCATION_TIMER_ID: usize = 2;
 pub(crate) const BUTTON_STYLE: u32 = windows::Win32::UI::WindowsAndMessaging::BS_OWNERDRAW as u32;
 pub(crate) const IMAGE_BITMAP: usize = 0;
 
 /// Registers the window class and runs the native UI message loop.
-pub(crate) fn run() {
+pub fn run() {
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let icc = windows::Win32::UI::Controls::INITCOMMONCONTROLSEX {

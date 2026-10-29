@@ -2,12 +2,12 @@ use super::{
     DEFAULT_IMAGE_COUNT, IMAGE_BITMAP, MAX_IMAGE_COUNT, WINDOW_TITLE, gdi::OwnedGdiObject,
     layout::layout_controls, preferences::Theme,
 };
-use crate::classical_worker::{ClassicalWorkerState, run_classical_clicker};
+use crate::classical_worker::{ClassicalWorkerConfig, ClassicalWorkerState, run_classical_clicker};
 use crate::gui::preferences::{
-    DEFAULT_CLASSICAL_DELAY_MS, DEFAULT_CLOSE_HOTKEY, DEFAULT_START_HOTKEY, DEFAULT_STOP_HOTKEY,
-    vk_to_string,
+    ClassicalLocationMode, ClassicalRepeatMode, DEFAULT_CLASSICAL_DELAY_MS, DEFAULT_CLOSE_HOTKEY,
+    DEFAULT_START_HOTKEY, DEFAULT_STOP_HOTKEY, vk_to_string,
 };
-use crate::input::ClickButton;
+use crate::input::{ClickButton, ClickType};
 use crate::matching::{DEFAULT_MATCH_THREADS, PreparedTemplate, default_click_delay_ms};
 use crate::worker::{WorkerState, run_clicker};
 use image::ImageReader;
@@ -69,8 +69,35 @@ pub(crate) struct AppState {
     pub(crate) classical_subtitle: HWND,
     pub(crate) classical_delay_label: HWND,
     pub(crate) classical_delay_input: HWND,
+    pub(crate) classical_hours_input: HWND,
+    pub(crate) classical_mins_input: HWND,
+    pub(crate) classical_secs_input: HWND,
+    pub(crate) classical_millis_input: HWND,
+    pub(crate) classical_hours_label: HWND,
+    pub(crate) classical_mins_label: HWND,
+    pub(crate) classical_secs_label: HWND,
+    pub(crate) classical_millis_label: HWND,
+    pub(crate) classical_random_checkbox: HWND,
+    pub(crate) classical_random_input: HWND,
+    pub(crate) classical_random_label: HWND,
+    pub(crate) classical_options_title: HWND,
     pub(crate) classical_button_label: HWND,
     pub(crate) classical_button_combo: HWND,
+    pub(crate) classical_click_type_label: HWND,
+    pub(crate) classical_click_type_combo: HWND,
+    pub(crate) classical_repeat_title: HWND,
+    pub(crate) classical_repeat_stopped_radio: HWND,
+    pub(crate) classical_repeat_count_radio: HWND,
+    pub(crate) classical_repeat_count_input: HWND,
+    pub(crate) classical_repeat_count_label: HWND,
+    pub(crate) classical_location_title: HWND,
+    pub(crate) classical_location_current_radio: HWND,
+    pub(crate) classical_location_pick_radio: HWND,
+    pub(crate) classical_pick_button: HWND,
+    pub(crate) classical_pick_x_label: HWND,
+    pub(crate) classical_pick_x_input: HWND,
+    pub(crate) classical_pick_y_label: HWND,
+    pub(crate) classical_pick_y_input: HWND,
     pub(crate) classical_status_label: HWND,
     pub(crate) classical_stats_label: HWND,
     pub(crate) classical_start_button: HWND,
@@ -78,6 +105,20 @@ pub(crate) struct AppState {
     pub(crate) classical_close_button: HWND,
     pub(crate) classical_always_on_top_checkbox: HWND,
     pub(crate) classical_delay_ms: u64,
+    pub(crate) classical_hours: u32,
+    pub(crate) classical_mins: u32,
+    pub(crate) classical_secs: u32,
+    pub(crate) classical_millis: u32,
+    pub(crate) classical_random_offset_enabled: bool,
+    pub(crate) classical_random_offset_ms: u32,
+    pub(crate) classical_click_type: ClickType,
+    pub(crate) classical_repeat_mode: ClassicalRepeatMode,
+    pub(crate) classical_repeat_count: u64,
+    pub(crate) classical_location_mode: ClassicalLocationMode,
+    pub(crate) classical_pick_x: i32,
+    pub(crate) classical_pick_y: i32,
+    pub(crate) is_picking_location: bool,
+    pub(crate) pick_released: bool,
     pub(crate) classical_button: ClickButton,
     pub(crate) classical_worker: Option<Arc<ClassicalWorkerState>>,
     pub(crate) menu_status_title: HWND,
@@ -185,8 +226,35 @@ impl AppState {
             classical_subtitle: HWND::default(),
             classical_delay_label: HWND::default(),
             classical_delay_input: HWND::default(),
+            classical_hours_input: HWND::default(),
+            classical_mins_input: HWND::default(),
+            classical_secs_input: HWND::default(),
+            classical_millis_input: HWND::default(),
+            classical_hours_label: HWND::default(),
+            classical_mins_label: HWND::default(),
+            classical_secs_label: HWND::default(),
+            classical_millis_label: HWND::default(),
+            classical_random_checkbox: HWND::default(),
+            classical_random_input: HWND::default(),
+            classical_random_label: HWND::default(),
+            classical_options_title: HWND::default(),
             classical_button_label: HWND::default(),
             classical_button_combo: HWND::default(),
+            classical_click_type_label: HWND::default(),
+            classical_click_type_combo: HWND::default(),
+            classical_repeat_title: HWND::default(),
+            classical_repeat_stopped_radio: HWND::default(),
+            classical_repeat_count_radio: HWND::default(),
+            classical_repeat_count_input: HWND::default(),
+            classical_repeat_count_label: HWND::default(),
+            classical_location_title: HWND::default(),
+            classical_location_current_radio: HWND::default(),
+            classical_location_pick_radio: HWND::default(),
+            classical_pick_button: HWND::default(),
+            classical_pick_x_label: HWND::default(),
+            classical_pick_x_input: HWND::default(),
+            classical_pick_y_label: HWND::default(),
+            classical_pick_y_input: HWND::default(),
             classical_status_label: HWND::default(),
             classical_stats_label: HWND::default(),
             classical_start_button: HWND::default(),
@@ -194,6 +262,20 @@ impl AppState {
             classical_close_button: HWND::default(),
             classical_always_on_top_checkbox: HWND::default(),
             classical_delay_ms: DEFAULT_CLASSICAL_DELAY_MS,
+            classical_hours: 0,
+            classical_mins: 0,
+            classical_secs: 0,
+            classical_millis: 100,
+            classical_random_offset_enabled: false,
+            classical_random_offset_ms: 40,
+            classical_click_type: ClickType::default(),
+            classical_repeat_mode: ClassicalRepeatMode::default(),
+            classical_repeat_count: 1,
+            classical_location_mode: ClassicalLocationMode::default(),
+            classical_pick_x: 0,
+            classical_pick_y: 0,
+            is_picking_location: false,
+            pick_released: false,
             classical_button: ClickButton::default(),
             classical_worker: None,
             menu_status_title: HWND::default(),
@@ -495,12 +577,10 @@ impl AppState {
         set_text(self.menu_summary_label, &summary);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn set_classical_delay(&mut self, delay: u64) {
         let delay = delay.min(10000);
         self.classical_delay_ms = delay;
-        if let Some(worker) = &self.classical_worker {
-            worker.delay_ms.store(delay, Ordering::Relaxed);
-        }
         set_text(self.classical_delay_input, &delay.to_string());
         self.update_menu_summary();
         self.save_preferences();
@@ -508,11 +588,15 @@ impl AppState {
 
     pub(crate) fn set_classical_button(&mut self, button: ClickButton) {
         self.classical_button = button;
-        if let Some(worker) = &self.classical_worker {
-            worker.button.store(button as u8, Ordering::Relaxed);
-        }
         self.update_menu_summary();
         self.save_preferences();
+    }
+
+    pub(crate) fn sync_classical_interval(&mut self) {
+        self.classical_delay_ms = (self.classical_hours as u64 * 3_600_000)
+            + (self.classical_mins as u64 * 60_000)
+            + (self.classical_secs as u64 * 1_000)
+            + (self.classical_millis as u64);
     }
 
     pub(crate) fn start_classical(&mut self, window: HWND) {
@@ -532,10 +616,31 @@ impl AppState {
                 let _ = ShowWindow(window, SW_HIDE);
             }
         }
-        let worker = Arc::new(ClassicalWorkerState::new(
-            self.classical_delay_ms,
-            self.classical_button,
-        ));
+
+        self.sync_classical_interval();
+        let random_offset_ms = if self.classical_random_offset_enabled {
+            self.classical_random_offset_ms as u64
+        } else {
+            0
+        };
+        let repeat_limit = match self.classical_repeat_mode {
+            ClassicalRepeatMode::UntilStopped => 0,
+            ClassicalRepeatMode::Count => self.classical_repeat_count,
+        };
+        let target_pos = match self.classical_location_mode {
+            ClassicalLocationMode::Current => None,
+            ClassicalLocationMode::Pick => Some((self.classical_pick_x, self.classical_pick_y)),
+        };
+
+        let config = ClassicalWorkerConfig {
+            delay_ms: self.classical_delay_ms,
+            random_offset_ms,
+            button: self.classical_button,
+            click_type: self.classical_click_type,
+            repeat_limit,
+            target_pos,
+        };
+        let worker = Arc::new(ClassicalWorkerState::new(config));
         self.classical_worker = Some(Arc::clone(&worker));
         set_text(self.classical_status_label, "Running  |  Clicking...");
         self.update_menu_summary();

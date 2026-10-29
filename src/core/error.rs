@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum CoreError {
+pub enum CoreError {
     InvalidImageDimensions,
     DimensionsTooLarge(&'static str),
     InvalidPixelBuffer {

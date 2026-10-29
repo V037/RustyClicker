@@ -8,7 +8,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum ClickButton {
+pub enum ClickButton {
     #[default]
     Left,
     Right,
@@ -16,7 +16,7 @@ pub(crate) enum ClickButton {
 }
 
 impl ClickButton {
-    pub(crate) fn name(self) -> &'static str {
+    pub fn name(self) -> &'static str {
         match self {
             Self::Left => "Left Click",
             Self::Right => "Right Click",
@@ -24,7 +24,7 @@ impl ClickButton {
         }
     }
 
-    pub(crate) fn flags(self) -> (MOUSE_EVENT_FLAGS, MOUSE_EVENT_FLAGS) {
+    pub fn flags(self) -> (MOUSE_EVENT_FLAGS, MOUSE_EVENT_FLAGS) {
         match self {
             Self::Left => (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP),
             Self::Right => (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP),
@@ -33,11 +33,28 @@ impl ClickButton {
     }
 }
 
-pub(crate) fn send_left_click() -> Result<(), CoreError> {
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClickType {
+    #[default]
+    Single,
+    Double,
+}
+
+impl ClickType {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Single => "Single",
+            Self::Double => "Double",
+        }
+    }
+}
+
+pub fn send_left_click() -> Result<(), CoreError> {
     send_mouse_click(ClickButton::Left)
 }
 
-pub(crate) fn send_mouse_click(button: ClickButton) -> Result<(), CoreError> {
+pub fn send_mouse_click(button: ClickButton) -> Result<(), CoreError> {
     let (down_flag, up_flag) = button.flags();
     let input_size = std::mem::size_of::<INPUT>() as i32;
     let inputs = [
@@ -88,4 +105,24 @@ pub(crate) fn send_mouse_click(button: ClickButton) -> Result<(), CoreError> {
         expected: inputs.len() as u32,
         release_failed: false,
     })
+}
+
+pub fn send_mouse_click_type(
+    button: ClickButton,
+    click_type: ClickType,
+    position: Option<(i32, i32)>,
+) -> Result<(), CoreError> {
+    if let Some((x, y)) = position {
+        unsafe {
+            let _ = windows::Win32::UI::WindowsAndMessaging::SetCursorPos(x, y);
+        }
+    }
+    match click_type {
+        ClickType::Single => send_mouse_click(button),
+        ClickType::Double => {
+            send_mouse_click(button)?;
+            std::thread::sleep(std::time::Duration::from_millis(15));
+            send_mouse_click(button)
+        }
+    }
 }

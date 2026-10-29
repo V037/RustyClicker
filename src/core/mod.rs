@@ -1,2 +1,2 @@
-pub(crate) mod error;
-pub(crate) use error::CoreError;
+pub mod error;
+pub use error::CoreError;
